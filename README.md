@@ -49,7 +49,7 @@ PromptGraph is built for creators who:
 ### Word Cloud
 ![Word Cloud](docs/wordcloud.png)
 ### Focus Edit Mode
-![FOcus Edit Mode](docs/focusedit.png)
+![Focus Edit Mode](docs/focusedit.png)
 
 ---
 
@@ -82,7 +82,7 @@ PromptGraph Pro unlocks advanced features:
 * Advanced structural operations
 
 👉 Available via FANBOX:
-https://fanbox.jp/xxxxx
+[https://fanbox.jp/xxxxx](https://promptgraph.fanbox.cc/)
 
 ---
 
@@ -90,7 +90,7 @@ https://fanbox.jp/xxxxx
 
 If you find this tool useful, consider supporting development:
 
-👉 https://fanbox.jp/xxxxx
+👉 [https://fanbox.jp/xxxxx](https://promptgraph.fanbox.cc/)
 
 ---
 
