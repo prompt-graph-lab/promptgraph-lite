@@ -79,6 +79,13 @@ streamlit run app.py
 
 ---
 
+## ⚠️ Current Limitations
+
+- Currently focused on **Positive Prompts**
+- Support for Negative Prompts is planned for future updates
+
+---
+
 ## 🔓 Pro Version
 
 PromptGraph Pro is currently in development.
