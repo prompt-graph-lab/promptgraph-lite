@@ -77,6 +77,8 @@ streamlit run app.py
 3. Select nodes to analyze relationships
 4. Use Focus Edit Mode for safe editing
 
+Currently optimized for Positive Prompt workflows.
+
 ---
 
 ## ⚠️ Current Limitations
