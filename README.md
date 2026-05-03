@@ -82,7 +82,7 @@ PromptGraph Pro unlocks advanced features:
 * Advanced structural operations
 
 👉 Available via FANBOX:
-[https://fanbox.jp/xxxxx](https://promptgraph.fanbox.cc/)
+[https://promptgraph.fanbox.cc](https://promptgraph.fanbox.cc/)
 
 ---
 
@@ -90,7 +90,7 @@ PromptGraph Pro unlocks advanced features:
 
 If you find this tool useful, consider supporting development:
 
-👉 [https://fanbox.jp/xxxxx](https://promptgraph.fanbox.cc/)
+👉 [https://promptgraph.fanbox.cc](https://promptgraph.fanbox.cc/)
 
 ---
 
