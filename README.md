@@ -114,6 +114,7 @@ If you find this tool useful, consider supporting development:
 - Improved graph layout (auto clustering)
 - Better visualization controls
 - Enhanced editing workflow
+- Negative Prompt support
 
 ---
 
