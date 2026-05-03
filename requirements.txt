@@ -1,0 +1,6 @@
+streamlit
+streamlit-agraph
+wordcloud
+matplotlib
+websocket-client
+requests

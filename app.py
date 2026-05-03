@@ -1,0 +1,1559 @@
+import streamlit as st
+from streamlit_agraph import agraph, Node, Edge, Config
+from core.io import load_directory, export_to_txt, save_project_to_json, load_project_from_json
+from core.graph_builder import build_graph
+from core.operations import rename_node, delete_nodes, insert_node, duplicate_nodes, move_nodes, merge_duplicates_in_line, merge_duplicates_all_lines, apply_node_weight, insert_subgraph, replace_with_subgraph, rename_word_global, delete_word_global, insert_word_global, count_matches, get_available_modules, get_active_tokens, get_display_tokens, get_display_tokens_from_text, extract_module_structure_from_text
+from core.parser import parse_prompt
+import streamlit.components.v1 as components
+import os
+import uuid
+import copy
+import json
+from core.comfyui import generate_image_with_progress
+from core.settings import load_settings, save_settings, EDITION
+import sys
+from wordcloud import WordCloud
+import matplotlib.pyplot as plt
+
+# --- State Management ---
+def normalize_agraph_selection(return_value, project):
+    if not return_value:
+        return []
+
+    raw_items = return_value if isinstance(return_value, list) else [return_value]
+    ids = []
+
+    for item in raw_items:
+        if isinstance(item, str):
+            ids.append(item)
+        elif isinstance(item, dict):
+            if "id" in item:
+                ids.append(item["id"])
+            elif "node" in item:
+                ids.append(item["node"])
+        else:
+            if hasattr(item, "id"):
+                ids.append(item.id)
+
+    valid_ids = []
+    for nid in ids:
+        if nid in project.nodes and nid not in valid_ids:
+            valid_ids.append(nid)
+
+    return valid_ids
+
+if "settings" not in st.session_state:
+    st.session_state.settings = load_settings()
+if "history" not in st.session_state:
+    st.session_state.history = []
+if "project" not in st.session_state:
+    st.session_state.project = None
+if "selected_node_ids" not in st.session_state:
+    st.session_state.selected_node_ids = []
+if "disabled_modules" not in st.session_state:
+    st.session_state.disabled_modules = set()
+if "connect_mode" not in st.session_state:
+    st.session_state.connect_mode = False
+if "connect_nodes" not in st.session_state:
+    st.session_state.connect_nodes = []
+if "edition" not in st.session_state:
+    st.session_state.edition = EDITION
+if "show_tutorial" not in st.session_state:
+    st.session_state.show_tutorial = True
+
+def push_history():
+    if st.session_state.project:
+        st.session_state.history.append(st.session_state.project.clone())
+        # 履歴が多すぎると重くなるので制限
+        if len(st.session_state.history) > 20:
+            st.session_state.history.pop(0)
+
+def undo():
+    if len(st.session_state.history) > 0:
+        st.session_state.project = st.session_state.history.pop()
+        st.session_state.selected_node_ids = []
+        sync_text_areas()
+
+def sync_text_areas():
+    if st.session_state.project:
+        for line in st.session_state.project.prompt_lines:
+            key = f"text_{line.id}"
+            if key in st.session_state:
+                st.session_state[key] = line.current_text
+            
+            focus_key = f"focus_text_{line.id}"
+            if focus_key in st.session_state:
+                st.session_state[focus_key] = line.current_text
+
+def inject_keyboard_shortcuts():
+    components.html(
+        """
+        <script>
+        const doc = window.parent.document;
+        if (!doc.getElementById('sd-prompt-editor-shortcuts')) {
+            const scriptTag = doc.createElement('script');
+            scriptTag.id = 'sd-prompt-editor-shortcuts';
+            scriptTag.innerHTML = `
+                document.addEventListener('keydown', function(e) {
+                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+                    if (e.key === 'Delete' || e.key === 'Backspace') {
+                        const buttons = Array.from(document.querySelectorAll('button'));
+                        const deleteBtn = buttons.find(el => el.innerText.includes('🗑️ Delete Node'));
+                        if (deleteBtn) {
+                            deleteBtn.click();
+                        }
+                    }
+                });
+            `;
+            doc.head.appendChild(scriptTag);
+        }
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+def update_line_text(line_id: str, new_text: str):
+    push_history()
+    for line in st.session_state.project.prompt_lines:
+        if line.id == line_id:
+            line.current_text = new_text
+            line.tokens = parse_prompt(new_text)
+            line.edited = True
+            break
+    # グラフ再構築
+    prev_focus = st.session_state.get("focused_line_id")
+    st.session_state.project = build_graph(st.session_state.project)
+    restore_focus_after_graph_update(prev_focus)
+
+def delete_line(line_id: str):
+    push_history()
+    for line in st.session_state.project.prompt_lines:
+        if line.id == line_id:
+            line.deleted = True
+            break
+    prev_focus = st.session_state.get("focused_line_id")
+    st.session_state.project = build_graph(st.session_state.project)
+    restore_focus_after_graph_update(prev_focus)
+    # Check if selected nodes still exist
+    st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+
+def duplicate_line(line_id: str):
+    push_history()
+    new_lines = []
+    for line in st.session_state.project.prompt_lines:
+        new_lines.append(line)
+        if line.id == line_id:
+            new_line = copy.deepcopy(line)
+            new_line.id = f"line_{uuid.uuid4().hex[:8]}"
+            new_line.duplicated_from = line.id
+            new_line.edited = True
+            new_lines.append(new_line)
+            
+    st.session_state.project.prompt_lines = new_lines
+    # indexの振り直し
+    for i, l in enumerate(st.session_state.project.prompt_lines):
+        l.current_index = i
+    
+    prev_focus = st.session_state.get("focused_line_id")
+    st.session_state.project = build_graph(st.session_state.project)
+    restore_focus_after_graph_update(prev_focus)
+
+@st.dialog("Upgrade to Pro Edition")
+def show_upgrade_dialog(message: str):
+    st.warning(message)
+    st.markdown("""
+    ### 🚀 Unlock the Full Power of PromptGraph Pro
+    
+    The Pro edition is designed for high-velocity workflows and large datasets.
+    
+    **Pro Features:**
+    - **Bulk Editing**: Execute global operations across your entire dataset in one click.
+    - **Module Authoring**: Create and save your own reusable prompt modules.
+    - **Direct Workflow Sync**: Execute ComfyUI generations directly from the IDE.
+    - **Automation Loop**: Auto-rerun workflows as you edit your prompt graph.
+    - **Advanced Analytics**: Deep insights into your prompt structure.
+    
+    [Support on FANBOX & Get Pro](https://example.com/fanbox)
+    """)
+    if st.button("Close"):
+        st.rerun()
+
+def get_structural_stats(old_text, new_text):
+    from core.parser import parse_prompt, extract_node_metadata
+    from core.operations import get_display_tokens_from_text
+    
+    old_display_tokens = get_display_tokens_from_text(old_text)
+    new_display_tokens = get_display_tokens_from_text(new_text)
+    
+    # We still want to count modules from the raw tokens
+    raw_new_tokens = parse_prompt(new_text)
+    
+    token_delta = len(new_display_tokens) - len(old_display_tokens)
+    mod_count = sum(1 for t in raw_new_tokens if t.startswith("<mod:"))
+    has_weights = any(extract_node_metadata(t)["weight"] != 1.0 for t in new_display_tokens)
+    
+    change_ratio = 0
+    if old_display_tokens:
+        import difflib
+        sm = difflib.SequenceMatcher(None, old_display_tokens, new_display_tokens)
+        change_ratio = 1.0 - sm.ratio()
+        
+    return {
+        "token_delta": token_delta,
+        "mod_count": mod_count,
+        "has_weights": has_weights,
+        "change_ratio": change_ratio
+    }
+
+def is_free():
+    return st.session_state.get("edition") == "FREE"
+
+def require_pro(message: str) -> bool:
+    if is_free():
+        show_upgrade_dialog(message)
+        return False
+    return True
+
+def get_free_target_lines_or_block(message: str = "「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」"):
+    if is_free():
+        focused = st.session_state.get("focused_line_id")
+        if not focused:
+            st.error(message)
+            return None
+        return [focused]
+    return None
+
+def validate_node_input(text: str) -> bool:
+    if not text.strip() or "," in text or "\n" in text:
+        st.warning("🚫 入力された文字列に空文字、空白のみ、カンマ、または改行が含まれています。これらは使用できません。")
+        return False
+    return True
+
+def restore_focus_after_graph_update(previous_focused_line_id):
+    if not previous_focused_line_id:
+        return
+
+    project = st.session_state.get("project")
+    if not project:
+        st.session_state.focused_line_id = None
+        return
+
+    exists = any(
+        line.id == previous_focused_line_id and not getattr(line, "deleted", False)
+        for line in project.prompt_lines
+    )
+
+    if exists:
+        st.session_state.focused_line_id = previous_focused_line_id
+    else:
+        st.session_state.focused_line_id = None
+
+    if getattr(project, "nodes", None):
+        st.session_state.selected_node_ids = [
+            nid for nid in st.session_state.selected_node_ids
+            if nid in project.nodes
+        ]
+
+def get_neighborhood_node_ids(project, selected_node_ids, steps):
+    if not project or not selected_node_ids or steps is None:
+        return None
+
+    valid_selected = [
+        nid for nid in selected_node_ids
+        if nid in getattr(project, "nodes", {})
+    ]
+
+    if not valid_selected:
+        return set()
+
+    forward = {}
+    backward = {}
+
+    for source, target in getattr(project, "edges", []):
+        forward.setdefault(source, set()).add(target)
+        backward.setdefault(target, set()).add(source)
+
+    result = set(valid_selected)
+    frontier = set(valid_selected)
+
+    for _ in range(steps):
+        next_frontier = set()
+        for nid in frontier:
+            next_frontier.update(forward.get(nid, set()))
+            next_frontier.update(backward.get(nid, set()))
+        next_frontier -= result
+        result.update(next_frontier)
+        frontier = next_frontier
+        if not frontier:
+            break
+
+    return result
+
+# --- UI ---
+@st.dialog("Image Preview")
+def show_image_dialog(image_path: str, prompt_text: str):
+    if image_path and os.path.exists(image_path):
+        st.image(image_path, width="stretch")
+    else:
+        st.info("No Image Available")
+    st.markdown("**Prompt:**")
+    st.code(prompt_text, language="text")
+
+st.set_page_config(page_title="PromptGraph Lite", layout="wide")
+
+if st.session_state.show_tutorial:
+    st.title("🎉 PromptGraph Liteへようこそ！")
+
+    st.markdown("""
+    このツールは、Stable Diffusionのプロンプトを  
+    **グラフ構造で可視化・編集できるエディタ**です。
+
+    ---
+
+    ## 🧭 基本の使い方（3ステップ）
+
+    ### ① ノードをクリック
+    中央のグラフの単語（ノード）をクリックすると、  
+    関連する部分だけが表示されます。
+
+    👉 気になる単語をクリックしてみてください
+
+    ---
+
+    ### ② Word Cloudで単語を選ぶ
+    グラフの下にあるWord Cloudから単語を選ぶと、  
+    その単語を含むプロンプトを絞り込めます。
+
+    ---
+
+    ### ③ Focus Editで編集する
+    Linesタブで行を選び、「Focus Edit」を押すと、  
+    その1行だけ安全に編集できます。
+
+    ---
+
+    ## 🔍 このツールのポイント
+
+    - グラフで単語のつながりが見える
+    - Word Cloudで頻出ワードがわかる
+    - Active Prompt Previewで結果を確認できる
+
+    ---
+
+    ## ⚠ Free版の制限
+
+    - 一括編集はできません
+    - Module作成はできません
+    - ComfyUI実行はできません
+
+    ---
+
+    👉 まずはノードをクリックしてみてください
+
+    「このチュートリアルは、サイドバーの Help → Show Tutorial からいつでも再表示できます。」
+    """)
+
+    if st.button("Start Exploring PromptGraph Lite"):
+        st.session_state.show_tutorial = False
+        st.rerun()
+
+    st.stop()
+
+st.sidebar.title("PromptGraph Lite")
+
+inject_keyboard_shortcuts()
+
+# Directory loading
+target_dir = st.sidebar.text_input("Source Directory", st.session_state.settings.get("last_source_directory", "./dummy_data"))
+
+if st.sidebar.button("Load Directory"):
+    if os.path.isdir(target_dir):
+        st.session_state.history = []
+        with st.spinner("Building full graph..."):
+            project = load_directory(target_dir, max_depth=None)
+            project = build_graph(project)
+        st.session_state.project = project
+        st.session_state.focused_line_id = None
+        st.session_state.selected_node_ids = []
+        st.session_state.connect_mode = False
+        
+        st.session_state.settings["last_source_directory"] = target_dir
+        save_settings(st.session_state.settings)
+        st.sidebar.success(f"Loaded from {target_dir}")
+    else:
+        st.sidebar.error("Invalid directory path")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🛠️ Current Status")
+edition_label = "💎 PRO" if st.session_state.edition == "PRO" else "🆓 FREE"
+st.sidebar.write(f"**Edition:** {edition_label}")
+
+scope_mode = "🎯 Focus Edit Mode" if st.session_state.get("focused_line_id") else "🌐 Global View"
+st.sidebar.write(f"**Edit Scope:** {scope_mode}")
+
+if st.session_state.get("focused_line_id"):
+    line = next((l for l in st.session_state.project.prompt_lines if l.id == st.session_state.focused_line_id), None)
+    if line:
+        st.sidebar.caption(f"Target: {line.original_file_name}")
+elif is_free():
+    st.sidebar.warning("Free版では編集にFocus Edit Modeが必要です。Linesタブから編集したい行を選び、Focus Edit を押してください。")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Help")
+
+if st.sidebar.button("📘 Show Tutorial"):
+    st.session_state.show_tutorial = True
+    st.rerun()
+
+st.sidebar.caption("基本操作：ノード選択 → Word Cloud確認 → Focus Editで1行編集")
+
+# Depth calculation (kept internally)
+
+if st.session_state.project and st.session_state.project.prompt_lines:
+    max_depth = max([len(l.tokens) for l in st.session_state.project.prompt_lines if not l.deleted], default=1) - 1
+else:
+    max_depth = 0
+
+if "display_depth" not in st.session_state:
+    st.session_state.display_depth = max(0, max_depth)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Search Node")
+
+search_query = st.sidebar.text_input("Search Node (Word)")
+if st.sidebar.button("Search") and search_query:
+    if st.session_state.project and st.session_state.project.nodes:
+        found_ids = []
+        max_found_depth = 0
+        for nid, node in st.session_state.project.nodes.items():
+            if search_query.lower() in node.display.lower():
+                found_ids.append(nid)
+                if node.depth > max_found_depth:
+                    max_found_depth = node.depth
+        
+        if found_ids:
+            st.session_state.selected_node_ids = found_ids
+            st.rerun()
+        else:
+            st.sidebar.warning("No nodes found.")
+
+focus_mode = st.sidebar.toggle("Path Filter (Show Selected Paths Only)", key="focus_mode")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Graph Settings")
+
+has_selection = bool(st.session_state.selected_node_ids)
+
+neighborhood_steps = st.sidebar.slider(
+    "Neighborhood Steps",
+    min_value=1,
+    max_value=5,
+    value=st.session_state.get("neighborhood_steps", 2),
+    key="neighborhood_steps",
+    disabled=not has_selection,
+    help="ノード選択時に、選択ノードの前後何ステップまで表示するかを指定します。"
+)
+
+if not has_selection:
+    st.sidebar.caption("Neighborhood Stepsはノード選択後に有効になります。未選択時は初期Root表示です。")
+
+display_depth = st.session_state.get("display_depth", 2)  # kept internally; not shown in UI
+
+if is_free():
+    current_merge = getattr(st.session_state.project, "merge_by_word_only", False) if st.session_state.project else False
+    merge_preview = st.sidebar.checkbox(
+        "Merge Identical Words Preview",
+        value=current_merge,
+        help="Free版では表示プレビューのみです。同一単語を深さに関係なくまとめたグラフ表示を確認できます。Pro版ではこの統合ビューを使った高速な一括編集が可能です。"
+    )
+    st.sidebar.caption("Free版では表示プレビューのみです。Pro版ではこの統合ビューを使った高速な一括編集が可能です。")
+    if st.session_state.project and getattr(st.session_state.project, "merge_by_word_only", False) != merge_preview:
+        st.session_state.project.merge_by_word_only = merge_preview
+        prev_focus = st.session_state.get("focused_line_id")
+        st.session_state.project = build_graph(st.session_state.project)
+        restore_focus_after_graph_update(prev_focus)
+        sync_text_areas()
+        st.rerun()
+else:
+    merge_by_word = st.sidebar.checkbox("Merge Identical Words (Ignore Depth)", value=False)
+    if st.session_state.project and getattr(st.session_state.project, "merge_by_word_only", False) != merge_by_word:
+        st.session_state.project.merge_by_word_only = merge_by_word
+        prev_focus = st.session_state.get("focused_line_id")
+        st.session_state.project = build_graph(st.session_state.project)
+        restore_focus_after_graph_update(prev_focus)
+        sync_text_areas()
+        st.rerun()
+
+# Connect Mode: shown to all in Focus Edit Mode or Pro; hidden behind expander for Free outside Focus
+if is_free() and not st.session_state.get("focused_line_id"):
+    with st.sidebar.expander("Advanced Edit Tools", expanded=False):
+        st.checkbox("Connect Mode", value=False, disabled=True, key="_connect_mode_disabled_display")
+        st.caption("Connect ModeはFocus Edit Mode中にのみ使用できます。選択した2つのノードをつなげる編集機能です。")
+    # Ensure connect_mode is False while out of focus in FREE
+    if st.session_state.connect_mode:
+        st.session_state.connect_mode = False
+        st.session_state.connect_nodes = []
+else:
+    connect_mode = st.sidebar.toggle("Connect Mode", value=st.session_state.connect_mode)
+    if connect_mode != st.session_state.connect_mode:
+        st.session_state.connect_mode = connect_mode
+        st.session_state.connect_nodes = []
+        st.session_state.selected_node_ids = []
+        st.rerun()
+
+# Undo
+if st.sidebar.button("Undo", disabled=len(st.session_state.history)==0):
+    prev_focus = st.session_state.get("focused_line_id")
+    undo()
+    restore_focus_after_graph_update(prev_focus)
+    st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🧩 Module Toggles")
+if st.session_state.project:
+    available_modules = get_available_modules(st.session_state.project)
+    if available_modules:
+        for mod_id in available_modules:
+            current_val = mod_id not in st.session_state.disabled_modules
+            new_val = st.sidebar.checkbox(f"Module {mod_id}", value=current_val, key=f"mod_toggle_{mod_id}")
+            if new_val != current_val:
+                if new_val:
+                    st.session_state.disabled_modules.discard(mod_id)
+                else:
+                    st.session_state.disabled_modules.add(mod_id)
+                st.rerun()
+    else:
+        st.sidebar.info("No modules detected.")
+else:
+    st.sidebar.info("Load project first.")
+
+st.sidebar.markdown("---")
+# Export/Save
+# TODO: Add export modes: combined TXT / overwrite original files / write to separate output directory
+# 「Free版でのExport/Save許可はプレ公開方針。必要なら後で制限する。」
+export_path = st.sidebar.text_input("Export Combined TXT Path", st.session_state.settings.get("last_export_path", "prompts.txt"))
+st.sidebar.caption("現在は全プロンプトを1つのTXTにまとめて書き出します。元ファイル上書き/個別ファイル出力は今後対応予定です。")
+if st.sidebar.button("Export Combined TXT"):
+    if st.session_state.project:
+        export_to_txt(st.session_state.project, export_path, disabled_modules=st.session_state.disabled_modules)
+        st.session_state.settings["last_export_path"] = export_path
+        save_settings(st.session_state.settings)
+        st.sidebar.success(f"Exported to {export_path}")
+
+json_path = st.sidebar.text_input("Save Project (JSON)", "project.json")
+col_s1, col_s2 = st.sidebar.columns(2)
+with col_s1:
+    # 「Free版でのExport/Save許可はプレ公開方針。必要なら後で制限する。」
+    if st.button("Save JSON"):
+        if st.session_state.project:
+            save_project_to_json(st.session_state.project, json_path)
+            st.success("Project saved.")
+with col_s2:
+    if st.button("Load JSON"):
+        if os.path.exists(json_path):
+            st.session_state.history = []
+            project = load_project_from_json(json_path)
+            project = build_graph(project)
+            st.session_state.project = project
+            st.session_state.focused_line_id = None
+            st.session_state.selected_node_ids = []
+            st.session_state.connect_mode = False
+            st.success("Project loaded.")
+        else:
+            st.error("File not found")
+
+if not st.session_state.project:
+    st.info("Please load a directory or a project JSON from the sidebar.")
+    st.stop()
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("ComfyUI Integration")
+
+def update_comfy_settings():
+    st.session_state.settings["comfyui_url"] = st.session_state.comfy_url
+    st.session_state.settings["comfyui_workflow_path"] = st.session_state.comfy_workflow_path
+    save_settings(st.session_state.settings)
+
+st.session_state.comfy_url = st.sidebar.text_input("ComfyUI URL", st.session_state.settings.get("comfyui_url", "127.0.0.1:8188"), on_change=update_comfy_settings)
+st.session_state.comfy_workflow_path = st.sidebar.text_input("Workflow JSON Path", st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json"), on_change=update_comfy_settings)
+
+project = st.session_state.project
+
+col1, col2 = st.columns([1, 1])
+
+with col1:
+    st.subheader("Prompt Graph")
+    
+    if not hasattr(project, "phrase_freq"):
+        project = build_graph(project)
+        st.session_state.project = project
+        
+    # --- Phase 1: determine which nodes to display ---
+    # Focus constraint (Focus Edit Mode / Path Filter)
+    allowed_by_focus = None
+    if st.session_state.get("focused_line_id"):
+        target_line = next((l for l in project.prompt_lines if l.id == st.session_state.focused_line_id and not l.deleted), None)
+        if target_line:
+            allowed_by_focus = set(target_line.node_path)
+    elif st.session_state.get("focus_mode", False) and st.session_state.selected_node_ids:
+        allowed_by_focus = set()
+        for line in project.prompt_lines:
+            if not line.deleted:
+                if any(nid in line.node_path for nid in st.session_state.selected_node_ids):
+                    allowed_by_focus.update(line.node_path)
+
+    # Core display set: selected → neighborhood; unselected → depth ≤ 2
+    current_neighborhood_steps = st.session_state.get("neighborhood_steps", neighborhood_steps)
+    if st.session_state.selected_node_ids:
+        display_node_ids = get_neighborhood_node_ids(
+            project,
+            st.session_state.selected_node_ids,
+            current_neighborhood_steps
+        )
+        # Fallback: isolated node or empty neighborhood
+        if not display_node_ids:
+            display_node_ids = set(st.session_state.selected_node_ids)
+    else:
+        display_node_ids = {nid for nid, n in project.nodes.items() if n.depth <= 2}
+
+    # Apply focus constraint on top
+    if allowed_by_focus is not None:
+        display_node_ids = display_node_ids & allowed_by_focus
+
+    # --- Phase 2: render nodes from pre-computed set ---
+    nodes = []
+    displayed_node_ids = set()
+
+    for node_id in display_node_ids:
+        if node_id not in project.nodes:
+            continue
+        node_data = project.nodes[node_id]
+        color = "#FF9999" if node_id in st.session_state.selected_node_ids else "#97C2FC"
+        nodes.append(Node(id=node_id, label=f"{node_data.display}\n({node_data.count})", size=25, color=color))
+        displayed_node_ids.add(node_id)
+
+    # --- Phase 3: render edges between displayed nodes only ---
+    edges = []
+    for source, target in project.edges:
+        if source in displayed_node_ids and target in displayed_node_ids:
+            edges.append(Edge(source=source, label="", target=target, type="CURVE_SMOOTH"))
+
+    # Debug: verify Python-side node count changes with Neighborhood Steps
+    debug_graph = False
+    if debug_graph:
+        if st.session_state.selected_node_ids:
+            st.caption(f"Displayed nodes: {len(displayed_node_ids)} / Neighborhood Steps: {current_neighborhood_steps}")
+        else:
+            st.caption(f"Displayed nodes: {len(displayed_node_ids)} / Initial Root View")
+        
+    config = Config(width=600,
+                    height=360,
+                    directed=True, 
+                    physics=False, 
+                    hierarchical=True,
+                    direction="LR",
+                    interaction={"multiselect": True})
+
+    return_value = agraph(nodes=nodes, edges=edges, config=config)
+    
+    if return_value is not None:
+        new_selection = normalize_agraph_selection(return_value, project)
+        # Empty list from agraph is treated as a re-render artifact (e.g. Neighborhood Steps change);
+        # only update when agraph returns a genuine non-empty selection.
+        if new_selection:
+            if set(new_selection) != set(st.session_state.selected_node_ids):
+                st.session_state.selected_node_ids = new_selection
+                added_nodes = new_selection  # all newly selected for connect mode
+            
+            if st.session_state.connect_mode and new_selection:
+                if is_free() and not st.session_state.get("focused_line_id"):
+                    st.session_state.connect_nodes = []
+                    st.rerun()
+                    
+                for n in new_selection:
+                    if n not in st.session_state.connect_nodes:
+                        st.session_state.connect_nodes.append(n)
+                        
+                if len(st.session_state.connect_nodes) >= 2:
+                    source_id = st.session_state.connect_nodes[0]
+                    target_id = st.session_state.connect_nodes[1]
+                    if target_id in project.nodes:
+                        target_word = project.nodes[target_id].display
+                        
+                        target_lines = None
+                        if is_free():
+                            target_lines = get_free_target_lines_or_block()
+                            if target_lines is None:
+                                st.session_state.connect_nodes = []
+                                st.rerun()
+                        else:
+                            target_lines = [st.session_state.focused_line_id] if st.session_state.get("focused_line_id") else None
+
+                        push_history()
+                        prev_focus = st.session_state.get("focused_line_id")
+                        st.session_state.project = insert_node(st.session_state.project, source_id, target_word, "after", target_lines)
+                        restore_focus_after_graph_update(prev_focus)
+                        sync_text_areas()
+                    st.session_state.connect_nodes = []
+                    st.session_state.selected_node_ids = []
+
+            st.rerun()
+
+    st.markdown("---")
+    st.markdown("**☁️ Word Cloud**")
+    with st.expander("Advanced Word Cloud Settings", expanded=False):
+        mode = st.radio("WordCloud Mode", ["Global", "Graph"], horizontal=True)
+        global_group_freq = getattr(project, "global_group_freq", {})
+        group_options = ["All"] + list(global_group_freq.keys())
+        selected_group = st.selectbox("Group Filter", group_options)
+        analysis_mode = st.radio("Scoring Method", ["Raw Count", "Log Scaled", "TF-IDF Score"], horizontal=True)
+    
+    
+    freq = {}
+    if mode == "Global":
+        if selected_group == "All":
+            freq = getattr(project, "phrase_freq", {}).copy()
+        else:
+            freq = global_group_freq.get(selected_group, {}).copy()
+    elif mode == "Graph":
+        seen = set()
+        for node in project.nodes.values():
+            node_group = getattr(node, "group", "default")
+            if selected_group == "All" or node_group == selected_group:
+                phrase_key = " ".join(sorted(node.phrase))
+                if phrase_key in seen:
+                    continue
+                seen.add(phrase_key)
+                freq[phrase_key] = node.count
+                
+    stopwords = {
+        "best quality", "masterpiece", "high quality",
+        "1girl", "solo", "looking at viewer",
+        "absurdres", "highres", "ultra detailed",
+        "illustration", "official art"
+    }
+    freq = {k: v for k, v in freq.items() if k not in stopwords}
+    
+    
+    import math
+    if analysis_mode == "Log Scaled":
+        freq = {k: math.log(v + 1) for k, v in freq.items()}
+    elif analysis_mode == "TF-IDF Score":
+        num_groups = len(global_group_freq)
+        if num_groups > 0:
+            # 各単語が何グループに出現するかを計算
+            word_in_groups = {}
+            for g_freq in global_group_freq.values():
+                for word in g_freq:
+                    word_in_groups[word] = word_in_groups.get(word, 0) + 1
+            
+            idf_freq = {}
+            for k, v in freq.items():
+                df = word_in_groups.get(k, 1)
+                # idf = log((グループ総数 + 1) / 出現グループ数)
+                idf = math.log((num_groups + 1) / df)
+                score = v * idf
+                if score > 0:
+                    idf_freq[k] = score
+            freq = idf_freq
+
+    TOP_N = 200
+    freq = {k: v for k, v in freq.items() if v > 0}
+    freq = dict(sorted(freq.items(), key=lambda x: x[1], reverse=True)[:TOP_N])
+
+    sorted_words = sorted(freq.keys(), key=lambda w: freq[w], reverse=True)
+    
+    if not freq:
+        st.info("No data for current filter")
+        
+    if freq:
+        
+        wc = WordCloud(
+            width=800, 
+            height=400, 
+            background_color="black",
+            colormap="viridis",
+            max_words=200
+        )
+        wc.generate_from_frequencies(freq)
+        
+        fig, ax = plt.subplots(figsize=(10, 5))
+        ax.imshow(wc, interpolation="bilinear")
+        ax.axis("off")
+        fig.tight_layout(pad=0)
+        st.pyplot(fig)
+            
+    phrase_to_nodes = {}
+    for node in project.nodes.values():
+        key = " ".join(sorted(node.phrase))
+        if key not in phrase_to_nodes:
+            phrase_to_nodes[key] = []
+        phrase_to_nodes[key].append(node.id)
+    
+    # Word Cloud selection should be non-destructive.
+    # Graph selections can include words hidden from Word Cloud by stopwords
+    # (e.g. "1girl", "solo"). Do not let Word Cloud widgets clear those selections.
+    current_selected_words = []
+    current_selected_words_visible = []
+
+    for nid in st.session_state.selected_node_ids:
+        if nid in project.nodes:
+            key = " ".join(sorted(project.nodes[nid].phrase))
+            if key not in current_selected_words:
+                current_selected_words.append(key)
+            if key in freq and key not in current_selected_words_visible:
+                current_selected_words_visible.append(key)
+
+    top_n = 30
+    pills_options = sorted_words[:top_n]
+
+    selected_from_pills = st.pills(
+        "☁️ Word Cloud (Top 30)",
+        options=pills_options,
+        default=[w for w in current_selected_words_visible if w in pills_options],
+        format_func=lambda w: f"{w} ({freq[w]})",
+        selection_mode="multi"
+    )
+
+    remaining_options = sorted_words[top_n:]
+    if remaining_options:
+        selected_from_list = st.multiselect(
+            "More Words",
+            options=remaining_options,
+            default=[w for w in current_selected_words_visible if w in remaining_options],
+            format_func=lambda w: f"{w} ({freq[w]})"
+        )
+    else:
+        selected_from_list = []
+
+    selected_words_visible = (
+        (selected_from_pills if selected_from_pills else [])
+        + (selected_from_list if selected_from_list else [])
+    )
+
+    # Preserve graph-selected words that are not visible in Word Cloud.
+    hidden_selected_words = [
+        w for w in current_selected_words
+        if w not in freq
+    ]
+
+    merged_selected_words = hidden_selected_words + selected_words_visible
+
+    if set(merged_selected_words) != set(current_selected_words):
+        new_node_ids = []
+        for key in merged_selected_words:
+            if key in phrase_to_nodes:
+                new_node_ids.extend(phrase_to_nodes[key])
+        st.session_state.selected_node_ids = new_node_ids
+        st.rerun()
+    
+    if st.session_state.selected_node_ids:
+        st.markdown("---")
+        st.markdown("**⚡ Quick Actions**")
+
+        # Edit Scope Logic
+        scope_labels = {
+            "focused": "Focused Line Only",
+            "global": "Global (All Lines)"
+        }
+        scope_lookup = {v: k for k, v in scope_labels.items()}
+        
+        default_scope_key = "focused" if (st.session_state.get("focused_line_id") or is_free()) else "global"
+        
+        target_scope_label = st.session_state.get("qa_scope_radio", scope_labels[default_scope_key])
+        target_scope_key = scope_lookup.get(target_scope_label, default_scope_key)
+        
+        target_lines = None
+        use_global_word_ops = False
+        
+        if target_scope_key == "focused":
+            if st.session_state.get("focused_line_id"):
+                target_lines = [st.session_state.focused_line_id]
+                use_global_word_ops = True
+                st.info("⚠️ Operations will apply to the **focused line** based on matching words.")
+            else:
+                if st.session_state.edition == "FREE":
+                    st.warning("⚠️ 「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    use_global_word_ops = False
+                else:
+                    use_global_word_ops = True
+                    st.info("⚠️ Focus mode is not active. Applying globally to **all lines** based on matching words.")
+        elif target_scope_key == "global":
+            use_global_word_ops = True
+            st.info("⚠️ Operations will apply globally to **all lines** based on matching words, ignoring graph limits.")
+        else:
+            use_global_word_ops = False
+            st.info("⚠️ Operations will apply STRICTLY to nodes visible in the current graph view.")
+
+        match_mode = "exact"
+        if use_global_word_ops:
+            match_mode = st.radio("Match Mode:", ["exact", "contains"], horizontal=True)
+            
+            if len(st.session_state.selected_node_ids) == 1:
+                nid = st.session_state.selected_node_ids[0]
+                if nid in project.nodes:
+                    target_word = project.nodes[nid].display
+                    match_count = count_matches(st.session_state.project, target_word, target_lines, match_mode)
+                    st.info(f"🔍 **Preview:** Will modify {match_count} occurrences of '{target_word}'.")
+
+        if len(st.session_state.selected_node_ids) == 1:
+            st.markdown("### 単一ノード操作")
+            nid = st.session_state.selected_node_ids[0]
+            if nid in project.nodes:
+                current_word = project.nodes[nid].display
+                col_r1, col_r2 = st.columns([4, 1])
+                with col_r1:
+                    new_word = st.text_input("Rename", current_word, key=f"qr_{nid}", label_visibility="collapsed", help="ノード名を変更します。カンマや改行は使用できません。")
+                    st.caption("入力後、Apply Renameを押すと反映されます。")
+                with col_r2:
+                    if st.button("Apply Rename", key=f"qr_btn_{nid}"):
+                        if not new_word.strip() or "," in new_word or "\n" in new_word:
+                            st.warning("🚫 ノード名が空、またはカンマや改行が含まれています。有効な文字を入力してください。")
+                            st.stop()
+                        
+                        if new_word != current_word:
+                            if target_scope_key != "focused" and st.session_state.edition == "FREE":
+                                show_upgrade_dialog("複数行にわたる一括リネームはPro版の機能です。")
+                                st.stop()
+                            if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
+                                st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                                st.stop()
+                            
+                            push_history()
+                            prev_focus = st.session_state.get("focused_line_id")
+                            if use_global_word_ops:
+                                st.session_state.project = rename_word_global(st.session_state.project, current_word, new_word, target_lines, match_mode)
+                            else:
+                                st.session_state.project = rename_node(st.session_state.project, nid, new_word, target_lines)
+                            restore_focus_after_graph_update(prev_focus)
+                            sync_text_areas()
+                            st.rerun()
+                            
+
+            st.markdown("---")
+        st.markdown("**Add Node**")
+        add_word = st.text_input("New word to insert", key="qa_add_word")
+        add_pos = st.radio("Position", ["after", "before"], key="qa_add_pos", horizontal=True)
+        if st.button("Insert Node"):
+            if add_word:
+                if not validate_node_input(add_word):
+                    st.stop()
+
+                if target_scope_key != "focused" and st.session_state.edition == "FREE":
+                    show_upgrade_dialog("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.stop()
+                if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
+                    st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.stop()
+
+                push_history()
+                prev_focus = st.session_state.get("focused_line_id")
+                for nid in st.session_state.selected_node_ids:
+                    if use_global_word_ops and nid in project.nodes:
+                        st.session_state.project = insert_word_global(st.session_state.project, project.nodes[nid].display, add_word, add_pos, target_lines, match_mode)
+                    else:
+                        st.session_state.project = insert_node(st.session_state.project, nid, add_word, add_pos, target_lines)
+                restore_focus_after_graph_update(prev_focus)
+                sync_text_areas()
+                st.rerun()
+
+
+        else:
+            st.markdown("### 複数ノード操作")
+        if st.button("🗑️ Delete Node"):
+            if target_scope_key != "focused" and st.session_state.edition == "FREE":
+                show_upgrade_dialog("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                st.stop()
+            if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
+                st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                st.stop()
+
+            push_history()
+            prev_focus = st.session_state.get("focused_line_id")
+            if use_global_word_ops:
+                for nid in st.session_state.selected_node_ids:
+                    if nid in project.nodes:
+                        st.session_state.project = delete_word_global(st.session_state.project, project.nodes[nid].display, target_lines, match_mode)
+            else:
+                st.session_state.project = delete_nodes(st.session_state.project, st.session_state.selected_node_ids, target_lines)
+            restore_focus_after_graph_update(prev_focus)
+            st.session_state.selected_node_ids = []
+            sync_text_areas()
+            st.rerun()
+
+            st.markdown("---")
+        st.markdown("**Move Selected Nodes**")
+        all_node_options = {nid: n.display for nid, n in project.nodes.items() if nid not in st.session_state.selected_node_ids}
+        if all_node_options:
+            move_target = st.selectbox("Move relative to:", options=list(all_node_options.keys()), format_func=lambda x: all_node_options[x], key="qa_move_target")
+            move_pos = st.radio("Move Position", ["after", "before"], key="qa_move_pos", horizontal=True)
+            if st.button("Move Nodes"):
+                if target_scope_key != "focused" and st.session_state.edition == "FREE":
+                    show_upgrade_dialog("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.stop()
+                if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
+                    st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.stop()
+
+                push_history()
+                prev_focus = st.session_state.get("focused_line_id")
+                st.session_state.project = move_nodes(st.session_state.project, st.session_state.selected_node_ids, move_target, move_pos, target_lines)
+                restore_focus_after_graph_update(prev_focus)
+                sync_text_areas()
+                st.rerun()
+        else:
+            st.info("No other nodes to move to.")
+
+        st.markdown("---")
+        st.markdown("**⚖️ Weight Adjustment**")
+        cw1, cw2 = st.columns([3, 1])
+        with cw1:
+            # We use a static key or no key if it's unique enough. 
+            # Since it's only rendered once now, it's fine.
+            new_weight = st.slider("Node Weight", min_value=0.5, max_value=1.5, value=1.0, step=0.1, key="qa_weight_slider")
+        with cw2:
+            st.write("") # spacer
+            st.write("")
+            if st.button("Apply Weight", key="qa_weight_btn"):
+                effective_targets = target_lines
+                if is_free():
+                    effective_targets = get_free_target_lines_or_block()
+                    if effective_targets is None: st.stop()
+
+                push_history()
+                prev_focus = st.session_state.get("focused_line_id")
+                st.session_state.project = apply_node_weight(st.session_state.project, st.session_state.selected_node_ids, new_weight, effective_targets)
+                restore_focus_after_graph_update(prev_focus)
+                sync_text_areas()
+                st.rerun()
+
+        st.markdown("---")
+        with st.expander("Advanced / Pro Tools", expanded=False):
+            st.markdown("**🎯 Edit Scope**")
+            st.radio(
+                "Apply operations to:", 
+                options=list(scope_labels.values()), 
+                index=list(scope_labels.keys()).index(default_scope_key),
+                horizontal=True, 
+                key="qa_scope_radio"
+            )
+
+            st.markdown("---")
+            mod_name = st.text_input("Module Name", key="qa_mod_name")
+            if st.button("🧩 Convert to Module"):
+                if st.session_state.edition == "FREE":
+                    show_upgrade_dialog("Module authoring (converting nodes to reusable modules) is available in the Pro edition.")
+                    st.stop()
+
+                if not mod_name.strip():
+                    st.warning("Module name is required")
+                    st.stop()
+
+                selected_words = {
+                    project.nodes[nid].display
+                    for nid in st.session_state.selected_node_ids
+                    if nid in project.nodes
+                }
+
+                push_history()
+
+                for line in st.session_state.project.prompt_lines:
+                    if line.deleted:
+                        continue
+
+                    new_tokens = []
+                    for token in line.tokens:
+                        # ① すでにmodタグならそのまま
+                        if token.startswith("<mod:") or token.startswith("</mod:"):
+                            new_tokens.append(token)
+                            continue
+                        # ② 既にラップ済み（安全チェック）
+                        if token.startswith(f"<mod:{mod_name}>"):
+                            new_tokens.append(token)
+                            continue
+                        # ③ 対象ワードだけラップ
+                        if token in selected_words:
+                            new_tokens.append(f"<mod:{mod_name}>")
+                            new_tokens.append(token)
+                            new_tokens.append(f"</mod:{mod_name}>")
+                        else:
+                            new_tokens.append(token)
+
+                    line.tokens = new_tokens
+                    line.current_text = ", ".join(new_tokens)
+
+                st.session_state.project = build_graph(st.session_state.project)
+                sync_text_areas()
+                st.rerun()
+
+
+            st.markdown("---")
+            if st.button("📋 Duplicate Node"):
+                if target_scope_key != "focused" and st.session_state.edition == "FREE":
+                    show_upgrade_dialog("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.stop()
+                if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
+                    st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.stop()
+
+                push_history()
+                prev_focus = st.session_state.get("focused_line_id")
+                if use_global_word_ops:
+                    for nid in st.session_state.selected_node_ids:
+                        if nid in project.nodes:
+                            target_word = project.nodes[nid].display
+                            st.session_state.project = insert_word_global(st.session_state.project, target_word, target_word, "after", target_lines, match_mode)
+                else:
+                    st.session_state.project = duplicate_nodes(st.session_state.project, st.session_state.selected_node_ids, target_lines)
+                restore_focus_after_graph_update(prev_focus)
+                sync_text_areas()
+                st.rerun()
+
+            st.markdown("---")
+            if st.button("❌ Clear Selection"):
+                st.session_state.selected_node_ids = []
+                st.rerun()
+
+
+            st.markdown("---")
+            st.markdown("**🌟 Favorites (Snippets)**")
+            fav_name = st.text_input("Name for current selection", "My Favorite Snippet")
+            if st.button("Save Selection as Favorite"):
+                if not require_pro("Saving reusable snippets and structural insertion are Pro features."):
+                    st.stop()
+
+                nodes = [project.nodes[nid] for nid in st.session_state.selected_node_ids if nid in project.nodes]
+                nodes.sort(key=lambda n: n.depth)
+                words = [n.display for n in nodes]
+                if "favorite_subgraphs" not in st.session_state.settings:
+                    st.session_state.settings["favorite_subgraphs"] = []
+                st.session_state.settings["favorite_subgraphs"].append({"name": fav_name, "words": words})
+                save_settings(st.session_state.settings)
+                st.success(f"Saved: {fav_name} ({len(words)} words)")
+
+            favs = st.session_state.settings.get("favorite_subgraphs", [])
+            if favs:
+                st.markdown("---")
+                fav_options = {i: f"{f['name']} ({len(f['words'])} words)" for i, f in enumerate(favs)}
+                sel_fav_idx = st.selectbox("Select Favorite", options=list(fav_options.keys()), format_func=lambda x: fav_options[x])
+                sel_fav = favs[sel_fav_idx]
+                st.caption(", ".join(sel_fav["words"]))
+
+                fc1, fc2, fc3 = st.columns(3)
+                with fc1:
+                    if st.button("➕ Insert After"):
+                        if not require_pro("Reusable snippets and structural insertion are Pro features."):
+                            st.stop()
+
+                        push_history()
+                        prev_focus = st.session_state.get("focused_line_id")
+                        st.session_state.project = insert_subgraph(st.session_state.project, st.session_state.selected_node_ids[-1], sel_fav["words"], "after", target_lines)
+                        restore_focus_after_graph_update(prev_focus)
+                        sync_text_areas()
+                        st.rerun()
+                with fc2:
+                    if st.button("🔄 Replace"):
+                        if not require_pro("Reusable snippets and structural insertion are Pro features."):
+                            st.stop()
+
+                        push_history()
+                        prev_focus = st.session_state.get("focused_line_id")
+                        st.session_state.project = replace_with_subgraph(st.session_state.project, st.session_state.selected_node_ids, sel_fav["words"], target_lines)
+                        restore_focus_after_graph_update(prev_focus)
+                        st.session_state.selected_node_ids = []
+                        sync_text_areas()
+                        st.rerun()
+                with fc3:
+                    if st.button("🗑️ Delete Fav"):
+                        st.session_state.settings["favorite_subgraphs"].pop(sel_fav_idx)
+                        save_settings(st.session_state.settings)
+                        st.rerun()
+
+
+
+with col2:
+    tab1, tab2 = st.tabs(["Lines", "Node Operations"])
+    
+    with tab1:
+        st.subheader("Prompt Lines")
+        
+        display_lines = [l for l in project.prompt_lines if not l.deleted]
+        
+        if st.session_state.selected_node_ids:
+            words = [project.nodes[nid].display for nid in st.session_state.selected_node_ids if nid in project.nodes]
+            st.info(f"Filtering by node(s): **{', '.join(words)}**")
+            # 選択中のすべてのノードを含むラインのみ表示するか、いずれかを含むラインを表示するか。
+            # 今回はいずれかを含む(OR条件)にする
+            display_lines = [l for l in display_lines if any(nid in l.node_path for nid in st.session_state.selected_node_ids)]
+        else:
+            st.write(f"Total Lines: {len(display_lines)}")
+        
+        if "selected_lines" not in st.session_state:
+            st.session_state.selected_lines = {}
+            
+        c_del, c_dup, c_merge = st.columns([1, 1, 1])
+        with c_del:
+            if st.button("🗑️ Delete Selected Lines"):
+                if not require_pro("Batch line operations are available in Pro."):
+                    st.stop()
+                
+                push_history()
+                to_delete = [lid for lid, checked in st.session_state.selected_lines.items() if checked]
+                for lid in to_delete:
+                    for line in st.session_state.project.prompt_lines:
+                        if line.id == lid:
+                            line.deleted = True
+                            break
+                prev_focus = st.session_state.get("focused_line_id")
+                st.session_state.project = build_graph(st.session_state.project)
+                restore_focus_after_graph_update(prev_focus)
+                st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+                st.session_state.selected_lines = {}
+                st.rerun()
+        with c_dup:
+            if st.button("📋 Duplicate Selected Lines"):
+                if not require_pro("Batch line operations are available in Pro."):
+                    st.stop()
+                
+                push_history()
+                to_dup = [lid for lid, checked in st.session_state.selected_lines.items() if checked]
+                new_lines = []
+                for line in st.session_state.project.prompt_lines:
+                    new_lines.append(line)
+                    if line.id in to_dup:
+                        new_line = copy.deepcopy(line)
+                        new_line.id = f"line_{uuid.uuid4().hex[:8]}"
+                        new_line.duplicated_from = line.id
+                        new_line.edited = True
+                        new_lines.append(new_line)
+                st.session_state.project.prompt_lines = new_lines
+                for i, l in enumerate(st.session_state.project.prompt_lines):
+                    l.current_index = i
+                prev_focus = st.session_state.get("focused_line_id")
+                st.session_state.project = build_graph(st.session_state.project)
+                restore_focus_after_graph_update(prev_focus)
+                st.session_state.selected_lines = {}
+                st.rerun()
+        with c_merge:
+            if st.button("✨ Merge All Duplicates"):
+                if not require_pro("Batch line operations are available in Pro."):
+                    st.stop()
+                
+                push_history()
+                prev_focus = st.session_state.get("focused_line_id")
+                st.session_state.project = merge_duplicates_all_lines(st.session_state.project)
+                restore_focus_after_graph_update(prev_focus)
+                st.rerun()
+                
+        st.write("---")
+        
+        if "focused_line_id" not in st.session_state:
+            st.session_state.focused_line_id = None
+            
+        if st.session_state.focused_line_id:
+            target_line = next((l for l in project.prompt_lines if l.id == st.session_state.focused_line_id and not l.deleted), None)
+            if not target_line:
+                # 行が存在しなくなった場合のみ解除
+                st.session_state.focused_line_id = None
+                st.rerun()
+                
+            st.markdown(f"### 🎯 Focus Edit Mode: `{target_line.original_file_name}`")
+            if st.button("🔙 Back to All Lines"):
+                st.session_state.focused_line_id = None
+                st.rerun()
+                
+            if st.session_state.edition == "FREE":
+                st.markdown("---")
+                st.markdown("### 📊 Active Prompt Preview (Free Edition)")
+                st.info("このプレビューは、現在の行プロンプトに対してModule Toggleなどを反映した、実際にExportされるプロンプトを表示します。通常のノード編集は保存時点でCurrent Line Promptに反映されるため、差分が小さい場合があります。")
+                
+                # Get current generated text
+                from core.operations import get_active_tokens
+                fallback_prompt = st.session_state.settings.get("fallback_prompt", "(masterpiece:1.0)")
+                current_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
+                current_generated_text = ", ".join(current_tokens)
+                
+                col_diff1, col_diff2 = st.columns(2)
+                with col_diff1:
+                    st.caption("Display Prompt")
+                    st.code(", ".join(get_display_tokens_from_text(target_line.current_text)), language="text")
+                with col_diff2:
+                    st.caption("Active Export Prompt")
+                    st.code(current_generated_text, language="text")
+                
+                # Structural Stats
+                stats = get_structural_stats(target_line.current_text, current_generated_text)
+                
+                c_stat1, c_stat2, c_stat3 = st.columns(3)
+                c_stat1.metric("Token Delta", f"{stats['token_delta']:+d}")
+                c_stat2.metric("Active Modules", stats['mod_count'])
+                c_stat3.metric("Change Ratio", f"{stats['change_ratio']:.1%}")
+                
+                st.markdown("**Active Prompt Hints:**")
+                with st.container(border=True):
+                    hints = []
+                    if stats['mod_count'] > 0:
+                        hints.append("- 🧩 **Module Detection**: Possible better modular control and tag reuse.")
+                    if abs(stats['token_delta']) > 5:
+                        hints.append("- 📏 **Length Shift**: Possible significant prompt emphasis shift.")
+                    if stats['has_weights']:
+                        hints.append("- ⚖️ **Weighting**: Likely strength/priority changes in the output.")
+                    if stats['change_ratio'] > 0.4:
+                        hints.append("- 🌊 **High Variation**: Transformation may significantly alter the original intent.")
+                    
+                    if hints:
+                        for h in hints: st.markdown(h)
+                    else:
+                        st.info("Minor structural changes detected.")
+                
+                st.text_area("Final Modified Prompt (for manual copy)", current_generated_text, height=100)
+                st.button("📋 Copy to Clipboard (Auto)", on_click=lambda: components.html(f"<script>navigator.clipboard.writeText('{current_generated_text.replace(chr(39), chr(92)+chr(39))}');</script>", height=0))
+                st.caption("Tip: Pro edition allows direct sync without copy-pasting.")
+
+            st.markdown("**Preview (Click graph nodes to highlight):**")
+            
+            highlight_words = [project.nodes[nid].display.lower() for nid in st.session_state.selected_node_ids if nid in project.nodes]
+            
+            preview_html = ""
+            display_tokens = get_display_tokens(target_line)
+            from core.parser import extract_node_metadata
+            for token in display_tokens:
+                meta = extract_node_metadata(token)
+                base = meta["base_word"].lower()
+                if base in highlight_words:
+                    preview_html += f"<mark style='background-color: #FFD700; font-weight: bold; padding: 2px 4px; border-radius: 4px;'>{token}</mark>, "
+                else:
+                    preview_html += f"{token}, "
+            preview_html = preview_html.strip(", ")
+            st.markdown(preview_html, unsafe_allow_html=True)
+            
+            with st.expander("Raw Prompt with Module Tags (Debug)", expanded=False):
+                st.code(target_line.current_text, language="text")
+            
+            st.markdown("---")
+            new_text = st.text_area("Edit Prompt", target_line.current_text, key=f"focus_text_{target_line.id}", height=150)
+            c1, c2 = st.columns(2)
+            with c1:
+                if new_text != target_line.current_text:
+                    if st.button("💾 Save Changes", type="primary"):
+                        if st.session_state.edition == "FREE":
+                            old_structure = extract_module_structure_from_text(target_line.current_text)
+                            new_structure = extract_module_structure_from_text(new_text)
+                            if old_structure != new_structure:
+                                st.error("Free版ではModuleタグの追加・削除・変更はできません。通常のプロンプト本文だけを編集してください。Module作成・編集はPro版機能です。")
+                                st.stop()
+                        update_line_text(target_line.id, new_text)
+                        st.rerun()
+            with c2:
+                if st.button("✨ Merge Duplicate Words"):
+                    push_history()
+                    prev_focus = st.session_state.get("focused_line_id")
+                    st.session_state.project = merge_duplicates_in_line(st.session_state.project, target_line.id)
+                    restore_focus_after_graph_update(prev_focus)
+                    st.rerun()
+
+            with st.expander("Image Preview", expanded=False):
+                img_c1, img_c2 = st.columns(2)
+                with img_c1:
+                    st.markdown("**Original Image**")
+                    if target_line.image_path and os.path.exists(target_line.image_path):
+                        st.image(target_line.image_path, width="stretch")
+                    else:
+                        st.info("No original image.")
+                with img_c2:
+                    st.markdown("**Generated Image**")
+                    if getattr(target_line, "generated_image_path", None) and os.path.exists(target_line.generated_image_path):
+                        st.image(target_line.generated_image_path, width="stretch")
+                    else:
+                        st.info("No generated image yet.")
+                    
+            if st.button("🎨 Generate with ComfyUI", type="primary"):
+                if st.session_state.edition == "FREE":
+                    show_upgrade_dialog("Direct ComfyUI execution and progress tracking are available in the Pro edition.")
+                    st.stop()
+                
+                if not os.path.exists(st.session_state.comfy_workflow_path):
+                    st.error(f"Workflow JSON not found at {st.session_state.comfy_workflow_path}")
+                else:
+                    try:
+                        with open(st.session_state.comfy_workflow_path, 'r', encoding='utf-8') as f:
+                            wf_str = f.read()
+                            
+                        mapping = st.session_state.settings.get("comfy_mapping")
+                        fallback_prompt = st.session_state.settings.get("fallback_prompt", "(masterpiece:1.0)")
+                        if mapping and "group_map" in mapping:
+                            workflow_json = json.loads(wf_str)
+                            from core.comfyui import build_prompt_by_group, inject_prompt_to_workflow
+                            grouped = build_prompt_by_group(st.session_state.project, target_line, st.session_state.disabled_modules)
+                            workflow_json = inject_prompt_to_workflow(workflow_json, grouped, mapping, fallback_prompt=fallback_prompt)
+                        else:
+                            if "__PROMPT__" not in wf_str:
+                                st.warning("The workflow JSON does not contain '__PROMPT__'. The prompt will not be injected.")
+                            
+                            active_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
+                            escaped_prompt = json.dumps(", ".join(active_tokens))[1:-1]
+                            wf_str = wf_str.replace("__PROMPT__", escaped_prompt)
+                            workflow_json = json.loads(wf_str)
+                        
+                        output_dir = os.path.join(st.session_state.project.source_directory, "generated")
+                        
+                        progress_bar = st.progress(0.0)
+                        status_text = st.empty()
+                        
+                        gen_path = None
+                        for status in generate_image_with_progress(
+                            workflow_json, 
+                            st.session_state.comfy_url, 
+                            output_dir, 
+                            f"gen_{target_line.id}"
+                        ):
+                            if "value" in status:
+                                progress_bar.progress(status["value"])
+                            if "text" in status:
+                                status_text.markdown(f"**Status:** {status['text']}")
+                            if status.get("type") == "done":
+                                gen_path = status.get("path")
+                                
+                        if gen_path:
+                            target_line.generated_image_path = gen_path
+                            st.rerun()
+                    except Exception as e:
+                        st.error(f"Generation failed: {e}")
+                
+        else:
+            for l in display_lines:
+                title = f"[{l.original_file_name}] Line {l.original_index}"
+                if l.edited:
+                    title += " (Edited)"
+                if l.duplicated_from:
+                    title += " (Duplicated)"
+                    
+                col_chk, col_exp = st.columns([0.05, 0.95])
+                with col_chk:
+                    st.session_state.selected_lines[l.id] = st.checkbox("Select", value=st.session_state.selected_lines.get(l.id, False), key=f"chk_{l.id}", label_visibility="collapsed")
+                
+                with col_exp:
+                    with st.expander(title):
+                        if st.button("🎯 Focus Edit", key=f"focus_btn_{l.id}"):
+                            st.session_state.focused_line_id = l.id
+                            st.rerun()
+                            
+                        if l.image_path and os.path.exists(l.image_path):
+                            c_img, c_txt = st.columns([1, 2])
+                            with c_img:
+                                st.image(l.image_path, width="stretch")
+                            with c_txt:
+                                new_text = st.text_area("Prompt Text", l.current_text, key=f"text_{l.id}", label_visibility="collapsed")
+                        else:
+                            new_text = st.text_area("Prompt Text", l.current_text, key=f"text_{l.id}")
+                            
+                        if new_text != l.current_text:
+                            if st.button("Save Changes", key=f"save_{l.id}"):
+                                if is_free() and not st.session_state.get("focused_line_id"):
+                                    st.error("「Free版では編集にFocus Edit Modeが必要です。Focus Edit を押して Focus Edit Modeに入ってから編集してください。」")
+                                    st.stop()
+                                update_line_text(l.id, new_text)
+                                st.rerun()
+                                
+                        c1, c2 = st.columns(2)
+                        if c1.button("Duplicate", key=f"dup_{l.id}"):
+                            if is_free() and not st.session_state.get("focused_line_id"):
+                                st.error("「Free版では編集にFocus Edit Modeが必要です。Focus Edit を押して Focus Edit Modeに入ってから編集してください。」")
+                                st.stop()
+                            duplicate_line(l.id)
+                            st.rerun()
+                        if c2.button("Delete", key=f"del_{l.id}"):
+                            if is_free() and not st.session_state.get("focused_line_id"):
+                                st.error("「Free版では編集にFocus Edit Modeが必要です。Focus Edit を押して Focus Edit Modeに入ってから編集してください。」")
+                                st.stop()
+                            delete_line(l.id)
+                            st.rerun()
+
+    with tab2:
+        if st.session_state.connect_mode:
+            st.subheader("Connect Mode Active")
+            st.info("グラフ上でノードを2つ順番にクリックして接続します。")
+            if len(st.session_state.connect_nodes) == 0:
+                st.write("1. 接続元のノードを選択してください...")
+            elif len(st.session_state.connect_nodes) == 1:
+                nid = st.session_state.connect_nodes[0]
+                word = project.nodes[nid].display if nid in project.nodes else nid
+                st.write(f"1. 接続元: **{word}**")
+                st.write("2. 接続先のノードを選択してください...")
+        else:
+            st.subheader("Node Operations")
+            if not st.session_state.selected_node_ids:
+                st.info("グラフ上でノードを選択してください。(Shift/Ctrlクリックで複数選択可能ですが、環境により動作しない場合は一つずつ選択してください)")
+            else:
+                st.write("選択中のノード:")
+                for nid in st.session_state.selected_node_ids:
+                    if nid in project.nodes:
+                        st.write(f"- **{project.nodes[nid].display}**")
+                
+                st.markdown("---")
+                
+                if len(st.session_state.selected_node_ids) == 1:
+                    nid = st.session_state.selected_node_ids[0]
+                    
+                    add_word = st.text_input("New Node Word")
+                    pos = st.radio("Position", ["Before", "After"])
+                    if st.button("Add Node"):
+                        if add_word:
+                            if not validate_node_input(add_word):
+                                st.stop()
+                                
+                            effective_targets = None
+                            if is_free():
+                                effective_targets = get_free_target_lines_or_block()
+                                if effective_targets is None: st.stop()
+                                
+                            push_history()
+                            prev_focus = st.session_state.get("focused_line_id")
+                            st.session_state.project = insert_node(st.session_state.project, nid, add_word, pos.lower(), effective_targets)
+                            restore_focus_after_graph_update(prev_focus)
+                            sync_text_areas()
+                            st.rerun()
+                        
+                    st.markdown("---")
+                    
+                    st.write("**Link to Existing Node**")
+                    existing_options = {n.id: n.display for n in project.nodes.values()}
+                    if existing_options:
+                        link_target_id = st.selectbox("Select Node to Link", options=[""] + list(existing_options.keys()), format_func=lambda x: existing_options[x] if x else "--- Select Node ---")
+                        link_pos = st.radio("Link Position", ["Before", "After"], key="link_pos")
+                        if st.button("Link Node") and link_target_id:
+                            effective_targets = None
+                            if is_free():
+                                effective_targets = get_free_target_lines_or_block()
+                                if effective_targets is None: st.stop()
+                                
+                            push_history()
+                            prev_focus = st.session_state.get("focused_line_id")
+                            target_word = project.nodes[link_target_id].display
+                            st.session_state.project = insert_node(st.session_state.project, nid, target_word, link_pos.lower(), effective_targets)
+                            restore_focus_after_graph_update(prev_focus)
+                            sync_text_areas()
+                            st.rerun()
+                            
+                st.markdown("---")
+                
+                target_options = {n.id: n.display for n in project.nodes.values() if n.id not in st.session_state.selected_node_ids}
+                if target_options:
+                    target_id = st.selectbox("Move Target Node", options=list(target_options.keys()), format_func=lambda x: target_options[x])
+                    move_pos = st.radio("Move Position", ["Before", "After"], key="move_pos")
+                    if st.button("Move Selected Node(s)"):
+                        effective_targets = None
+                        if is_free():
+                            effective_targets = get_free_target_lines_or_block()
+                            if effective_targets is None: st.stop()
+                            
+                        push_history()
+                        prev_focus = st.session_state.get("focused_line_id")
+                        st.session_state.project = move_nodes(st.session_state.project, st.session_state.selected_node_ids, target_id, move_pos.lower(), effective_targets)
+                        restore_focus_after_graph_update(prev_focus)
+                        st.session_state.selected_node_ids = []
+                        sync_text_areas()
+                        st.rerun()
+                else:
+                    st.write("移動先のノードがありません。")
