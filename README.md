@@ -44,10 +44,11 @@ PromptGraph is built for creators who:
 ## 🖼️ Screenshots
 
 ### Prompt Graph
-
+./doc/graph.png
 ### Word Cloud
-
+./doc/wordcloud.png
 ### Focus Edit Mode
+./doc/focusedit.png
 
 ---
 
