@@ -1,6 +1,7 @@
 # PromptGraph Lite
 
 A prompt IDE for managing and optimizing prompt collections.
+
 Designed not for single image editing, but for refining entire prompt sets.
 
 ---
