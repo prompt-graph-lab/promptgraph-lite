@@ -46,8 +46,14 @@ PromptGraph is built for creators who:
 
 ### Prompt Graph
 ![Prompt Graph](docs/graph.png)
+
+Merge identical words to simplify the graph and understand structure instantly.
+
+> Graph layout will be improved in future updates.
+
 ### Word Cloud
 ![Word Cloud](docs/wordcloud.png)
+
 ### Focus Edit Mode
 ![Focus Edit Mode](docs/focusedit.png)
 
