@@ -81,13 +81,15 @@ streamlit run app.py
 
 ## 🔓 Pro Version
 
-PromptGraph Pro unlocks advanced features:
+PromptGraph Pro is currently in development.
 
-* Batch editing across prompt sets
-* Faster workflow tools
-* Advanced structural operations
+Planned features include:
 
-👉 Available via FANBOX:
+- Batch editing across prompt sets  
+- Faster workflow tools  
+- Advanced structural operations  
+
+👉 Will be available via FANBOX  
 [https://promptgraph.fanbox.cc](https://promptgraph.fanbox.cc/)
 
 ---
@@ -97,6 +99,14 @@ PromptGraph Pro unlocks advanced features:
 If you find this tool useful, consider supporting development:
 
 👉 [https://promptgraph.fanbox.cc](https://promptgraph.fanbox.cc/)
+
+---
+
+## 🧭 Roadmap
+
+- Improved graph layout (auto clustering)
+- Better visualization controls
+- Enhanced editing workflow
 
 ---
 
