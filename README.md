@@ -42,6 +42,14 @@ PromptGraph is built for creators who:
 
 ---
 
+## 🚀 Try Online
+
+Try PromptGraph Lite instantly in your browser:
+
+👉 [https://promptgraph-lite.streamlit.app](https://promptgraph-lite.streamlit.app/)
+
+---
+
 ## 🖼️ Screenshots
 
 ### Prompt Graph
