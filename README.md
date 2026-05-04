@@ -72,8 +72,8 @@ Merge identical words to simplify the graph and understand structure instantly.
 ```bash
 git clone https://github.com/prompt-graph-lab/promptgraph-lite.git
 cd promptgraph-lite
-pip install -r requirements.txt
-streamlit run app.py
+python -m pip install -r requirements.txt
+python -m streamlit run app.py
 ```
 
 ---
