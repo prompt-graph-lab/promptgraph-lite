@@ -127,7 +127,7 @@ def inject_keyboard_shortcuts():
 
             function findButton(label) {{
                 return Array.from(doc.querySelectorAll("button")).find(
-                    (button) => (button.innerText || "").includes(label)
+                    (button) => ((button.textContent || "").trim()).includes(label)
                 );
             }}
 
@@ -165,7 +165,7 @@ def inject_keyboard_shortcuts():
                             focusEditor: "Shortcut Action: Focus Editor",
                         }};
                         const findButton = (label) => Array.from(document.querySelectorAll("button")).find(
-                            (button) => (button.innerText || "").includes(label)
+                            (button) => ((button.textContent || "").trim()).includes(label)
                         );
                         const clickShortcut = (label) => {{
                             const button = findButton(label);
@@ -197,7 +197,8 @@ def inject_keyboard_shortcuts():
                         }}
                         if (isModifier && (key === "s" || code === "KeyS")) {{
                             if (!state.hasFocus) return;
-                            if (clickShortcut(labels.save)) handled();
+                            handled();
+                            clickShortcut(labels.save);
                             return;
                         }}
                         if ((e.key === "F2" || e.key === "Enter") && state.hasFocus && !editable && !isModifier) {{
