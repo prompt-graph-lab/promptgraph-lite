@@ -85,6 +85,14 @@ def sync_text_areas():
             if focus_key in st.session_state:
                 st.session_state[focus_key] = line.current_text
 
+def get_line_by_id(project, line_id):
+    if not project or not line_id:
+        return None
+    return next(
+        (line for line in project.prompt_lines if line.id == line_id and not getattr(line, "deleted", False)),
+        None,
+    )
+
 def _shortcut_context():
     line = get_line_by_id(st.session_state.get("project"), st.session_state.get("focused_line_id"))
     return {
