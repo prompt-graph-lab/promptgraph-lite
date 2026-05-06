@@ -1,51 +1,61 @@
 # PromptGraph Lite
 
-PromptGraph Lite is a graph-based Prompt IDE for Stable Diffusion and AI image generation workflows.
+Graph-based Prompt IDE for Stable Diffusion workflows.
 
-Instead of treating prompts as a single long text string, PromptGraph visualizes prompt structure, relationships, and editing flow as a graph.
+PromptGraph Lite visualizes prompt structure, relationships, and editing flow as an interactive graph.
 
-The goal is to make prompt editing:
+Instead of treating prompts as a single long text string,
+PromptGraph approaches prompts as structured editable data.
+
+The goal is to make prompts:
 - easier to understand
 - easier to organize
 - easier to reuse
 - easier to evolve into scene-oriented workflows
 
-PromptGraph is designed not only for humans, but also for future AI-assisted prompt workflows and agent-driven generation systems.
-
-PromptGraph currently uses Streamlit as a rapid development and validation frontend. The current Lite build focuses on learning, visualization, safe Focus Edit workflows, and validating the core PromptGraph concept.
-
-Keyboard shortcuts are currently experimental in the Streamlit UI. Some browser-level shortcuts may not behave consistently depending on browser focus and Streamlit iframe behavior. Stable editing workflows are available through the visible UI controls, which remain the recommended path for reliable editing.
-
-The long-term design emphasizes separating core prompt operations from the UI so the tool can later support APIs, AI-agent workflows, or possible future frontend options that are more suitable for IDE-style interaction. Streamlit remains the current supported UI during this validation phase.
+PromptGraph is designed not only for humans,
+but also for future AI-assisted workflows and agent-driven prompt systems.
 
 ---
 
 # What is PromptGraph?
 
-Traditional prompt editing usually looks like this:
+Traditional prompt editing often becomes difficult as prompts grow larger.
+
+Example:
 
     1girl, smile, outdoors, blue sky, detailed eyes, cinematic lighting...
 
-As prompts grow larger:
+As prompts become larger and more repetitive:
 - editing becomes difficult
-- repeated elements become hard to manage
-- scene reuse becomes painful
-- prompt relationships become invisible
+- reusable structures become hard to manage
+- scene relationships become invisible
+- workflow organization becomes painful
 
-PromptGraph approaches prompts as structured editable data.
+PromptGraph visualizes prompts as graph structures.
 
-It visualizes:
-- token relationships
-- prompt flow
-- repeated structures
-- scene composition
-- edit scope
-
-using an interactive graph UI.
+This enables:
+- prompt structure inspection
+- reusable workflow thinking
+- safer editing
+- scene-oriented organization
+- future automation-friendly workflows
 
 ---
 
 # Core Concepts
+
+## Prompt Token
+
+PromptGraph internally treats prompts as structured prompt tokens rather than plain text.
+
+This allows future support for:
+- token-aware editing
+- structural transformations
+- AI-assisted workflows
+- reusable scene operations
+
+---
 
 ## Prompt Line
 
@@ -59,37 +69,66 @@ Example:
 
 ## Focus Edit Mode
 
-Focus Edit Mode allows editing a single prompt line safely and clearly.
+Focus Edit Mode allows safe editing of a single prompt line.
 
-In Lite edition:
-- editing is intentionally restricted to focused operations
-- global destructive editing is limited
-- the goal is understanding and controlled editing
+Lite edition intentionally emphasizes:
+- controlled editing
+- understanding prompt structure
+- safe local operations
+
+Large-scale destructive editing is intentionally limited in Lite.
 
 ---
 
 ## Graph-Based Editing
 
-PromptGraph visualizes prompt structure as nodes and edges.
+PromptGraph visualizes prompts as nodes and edges.
 
 This makes it easier to:
 - understand repeated tokens
 - inspect prompt composition
-- trace scene structure
 - identify reusable elements
+- trace scene structure
+- understand editing scope
 
 ---
 
 ## Scene-Oriented Workflow
 
-PromptGraph is designed around prompt sequences and scene workflows rather than isolated single-image prompts.
+PromptGraph is designed around prompt sequences rather than isolated single prompts.
 
-Future workflow direction includes:
+Long-term workflow direction includes:
 - scene management
 - sequence editing
 - reusable scene structures
 - character/scene separation
 - AI-assisted prompt generation
+
+---
+
+# Current UI Direction
+
+PromptGraph currently uses Streamlit as a rapid development and validation frontend.
+
+The current Lite build focuses on validating:
+- graph-based prompt workflows
+- prompt visualization
+- safe editing flows
+- reusable prompt operations
+
+before moving toward heavier IDE-style frontend architecture.
+
+The long-term design separates:
+- prompt operation logic
+- parser logic
+- graph logic
+- UI/frontend layers
+
+This enables future support for:
+- APIs
+- AI-agent workflows
+- MCP/server integrations
+- alternative frontends
 
 ---
 
@@ -103,49 +142,27 @@ Future workflow direction includes:
 - Undo/history system
 - Merge identical words
 - Rename/Delete preview
-- Limited / experimental keyboard shortcuts v1
-- Stable button-based editing workflows
 - JSON save/load
 - TXT export
 - Streamlit-based UI
 - Prompt structure inspection
 - Word cloud visualization
+- Safe graph-oriented editing workflow
 
 ---
 
 ## Available in PromptGraph Pro
 
-PromptGraph Pro includes everything in Lite, plus additional advanced workflow features such as:
+PromptGraph Pro expands the workflow with advanced structured editing and automation-oriented features.
 
-- Negative Prompt v1 support
-- Advanced structured editing
-- Expanded automation-oriented workflow features
-- Future batch editing features
-- Future module workflow expansion
-- Future AI-assisted editing workflows
-
----
-
-## Keyboard Shortcuts v1
-
-Lite-safe shortcut support is available as an experimental Streamlit UI convenience. Button-based operations remain the recommended stable path.
-
-Current experimental shortcuts:
-
-| Shortcut | Action |
-|---|---|
-| Esc | Clear graph selection |
-| Ctrl/Cmd+Z | Undo |
-| Ctrl/Cmd+S | Save focused line |
-| Enter / F2 | Focus line editor |
-| Ctrl/Cmd+C | Copy focused line prompt |
-
-Lite edition shortcuts are intentionally focused on:
-- one-line editing
-- Focus Edit workflow
-- safe non-destructive interaction
-
-Global destructive editing remains restricted in Lite, and shortcuts do not bypass Focus Edit requirements.
+Current and planned Pro features include:
+- Negative Prompt support
+- Token-aware batch editing
+- Advanced workflow operations
+- Scene-oriented transformations
+- Prompt normalization workflows
+- AI-assisted editing systems
+- Future automation / API workflows
 
 ---
 
@@ -157,10 +174,15 @@ Designed for:
 - learning
 - prompt understanding
 - graph visualization
-- safe Focus Edit
-- trying the workflow
+- safe Focus Edit workflows
+- trying the PromptGraph concept
 
-Lite intentionally restricts global destructive editing features. Negative Prompt v1 is a Pro feature and is not available in Lite.
+Lite intentionally limits destructive global editing features.
+
+The goal is:
+- understanding
+- visualization
+- safe experimentation
 
 ---
 
@@ -168,37 +190,12 @@ Lite intentionally restricts global destructive editing features. Negative Promp
 
 Designed for:
 - fast structured editing
-- larger workflows
-- automation-oriented workflows
-- advanced prompt manipulation
+- larger prompt workflows
+- automation-oriented operations
+- reusable transformation pipelines
 - future AI-agent integration
 
-Pro includes more powerful editing capabilities and workflow features.
-
----
-
-# Recent Updates
-
-## Lite Updates
-
-Recent Lite improvements include:
-
-- Added limited / experimental keyboard shortcuts v1
-- Improved Focus Edit workflow
-- Improved Lite editing UX
-- Improved graph editing stability
-- Added Streamlit Cloud demo support
-- Added local run.bat startup support
-
----
-
-## Pro Updates
-
-Recent Pro improvements include:
-
-- Added Negative Prompt v1 support
-- Improved structured editing workflow
-- Expanded Prompt IDE functionality
+Pro focuses on scalable prompt workflow editing.
 
 ---
 
@@ -210,15 +207,13 @@ The long-term goal is:
 
 - Prompt IDE
 - Prompt sequence editor
-- Scene generation workflow tool
-- AI-friendly prompt editing system
+- Scene workflow system
+- AI-friendly prompt engine
 - Future MCP / agent-compatible workflow platform
 
-The project is being designed with both:
+The project is designed around both:
 - human usability
-- machine-readable structured workflows
-
-in mind.
+- machine-readable prompt structures
 
 ---
 
@@ -228,9 +223,9 @@ in mind.
 
 ![Prompt Graph](docs/graph.png)
 
-Merge identical words to simplify the graph and understand structure instantly.
+Merge identical words to simplify graph structure and understand prompt relationships instantly.
 
-> Graph layout will be improved in future updates.
+> Graph layout and visualization will continue evolving during development.
 
 ---
 
@@ -266,16 +261,12 @@ https://promptgraph.fanbox.cc/
 
 ## Local Launch
 
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+    pip install -r requirements.txt
+    streamlit run app.py
 
-or use:
+or:
 
-```txt
-run.bat
-```
+    run.bat
 
 ---
 
@@ -283,20 +274,20 @@ run.bat
 
 Planned future directions include:
 
-- Continue validating the PromptGraph workflow in Streamlit
-- Keep stable editing available through visible UI buttons
-- Separate core prompt operations from the UI over time
-- Scene structure system
+- Continue validating PromptGraph workflows in Streamlit
+- Improve graph-based editing workflows
+- Separate core prompt operations from the UI
+- Scene structure systems
 - Sequence editing
 - Prompt modules
 - AI-assisted prompt operations
 - WD14Tagger integration
-- Image-to-prompt workflow
+- Image-to-prompt workflows
 - ComfyUI integration
 - Prompt clustering
 - Prompt relationship analysis
 - AI-agent workflow support
-- Possible future frontend options after the core value is validated
+- Future frontend evolution after workflow validation
 
 ---
 
@@ -304,7 +295,7 @@ Planned future directions include:
 
 PromptGraph Lite is an experimental early-stage tool.
 
-The UI, workflow, and internal structure may change significantly during development.
+The UI, workflow, and internal structure may evolve significantly during development.
 
 Feedback and workflow experiments are welcome.
 
