@@ -60,6 +60,8 @@ if "edition" not in st.session_state:
     st.session_state.edition = EDITION
 if "show_tutorial" not in st.session_state:
     st.session_state.show_tutorial = True
+if "shortcut_feedback" not in st.session_state:
+    st.session_state.shortcut_feedback = ""
 
 def push_history():
     if st.session_state.project:
@@ -112,6 +114,9 @@ def inject_keyboard_shortcuts():
                 clear: "Shortcut Action: Clear Selection",
                 undo: "Shortcut Action: Undo",
                 save: "Shortcut Action: Save Focused Line",
+                copySuccess: "Shortcut Action: Copy Success",
+                copyFailed: "Shortcut Action: Copy Failed",
+                focusEditor: "Shortcut Action: Focus Editor",
             }};
 
             window.__promptGraphShortcutState = {{
@@ -135,20 +140,29 @@ def inject_keyboard_shortcuts():
                 }});
             }}
 
-            if (!doc.getElementById("promptgraph-shortcuts-v1")) {{
-                const scriptTag = doc.createElement("script");
-                scriptTag.id = "promptgraph-shortcuts-v1";
-                scriptTag.innerHTML = `
-                    document.addEventListener("keydown", async function(e) {{
+            const existingScript = doc.getElementById("promptgraph-shortcuts-v1");
+            if (existingScript) existingScript.remove();
+
+            const scriptTag = doc.createElement("script");
+            scriptTag.id = "promptgraph-shortcuts-v1";
+            scriptTag.innerHTML = `
+                    if (window.__promptGraphShortcutHandler) {{
+                        document.removeEventListener("keydown", window.__promptGraphShortcutHandler, true);
+                    }}
+                    window.__promptGraphShortcutHandler = async function(e) {{
                         const state = window.__promptGraphShortcutState || {{}};
                         const isModifier = e.ctrlKey || e.metaKey;
-                        const key = e.key.toLowerCase();
+                        const key = (e.key || "").toLowerCase();
+                        const code = e.code || "";
                         const tag = e.target ? e.target.tagName : "";
                         const editable = tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable);
                         const labels = {{
                             clear: "Shortcut Action: Clear Selection",
                             undo: "Shortcut Action: Undo",
                             save: "Shortcut Action: Save Focused Line",
+                            copySuccess: "Shortcut Action: Copy Success",
+                            copyFailed: "Shortcut Action: Copy Failed",
+                            focusEditor: "Shortcut Action: Focus Editor",
                         }};
                         const findButton = (label) => Array.from(document.querySelectorAll("button")).find(
                             (button) => (button.innerText || "").includes(label)
@@ -166,37 +180,50 @@ def inject_keyboard_shortcuts():
                             textArea.focus();
                             return true;
                         }};
+                        const handled = () => {{
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                        }};
 
                         if (e.key === "Escape") {{
-                            if (clickShortcut(labels.clear)) e.preventDefault();
+                            if (clickShortcut(labels.clear)) handled();
                             return;
                         }}
-                        if (isModifier && key === "z") {{
+                        if (isModifier && (key === "z" || code === "KeyZ")) {{
                             if (editable || !state.canUndo) return;
-                            if (clickShortcut(labels.undo)) e.preventDefault();
+                            if (clickShortcut(labels.undo)) handled();
                             return;
                         }}
-                        if (isModifier && key === "s") {{
+                        if (isModifier && (key === "s" || code === "KeyS")) {{
                             if (!state.hasFocus) return;
-                            e.preventDefault();
-                            clickShortcut(labels.save);
+                            if (clickShortcut(labels.save)) handled();
                             return;
                         }}
                         if ((e.key === "F2" || e.key === "Enter") && state.hasFocus && !editable && !isModifier) {{
-                            if (focusEditTextArea()) e.preventDefault();
+                            if (focusEditTextArea()) {{
+                                clickShortcut(labels.focusEditor);
+                                handled();
+                            }}
                             return;
                         }}
-                        if (isModifier && key === "c" && state.hasFocus && !editable) {{
-                            if (!navigator.clipboard) return;
-                            e.preventDefault();
+                        if (isModifier && (key === "c" || code === "KeyC") && state.hasFocus && !editable) {{
+                            handled();
+                            if (!navigator.clipboard) {{
+                                clickShortcut(labels.copyFailed);
+                                return;
+                            }}
                             try {{
                                 await navigator.clipboard.writeText(state.focusedPrompt || "");
-                            }} catch (err) {{}}
+                                clickShortcut(labels.copySuccess);
+                            }} catch (err) {{
+                                clickShortcut(labels.copyFailed);
+                            }}
                         }}
-                    }});
+                    }};
+                    document.addEventListener("keydown", window.__promptGraphShortcutHandler, true);
                 `;
-                doc.head.appendChild(scriptTag);
-            }}
+            doc.head.appendChild(scriptTag);
 
             hideShortcutButtons();
             setTimeout(hideShortcutButtons, 250);
@@ -211,6 +238,9 @@ def render_shortcut_actions():
     clear_selection = st.sidebar.button("Shortcut Action: Clear Selection", key="shortcut_clear_selection")
     shortcut_undo = st.sidebar.button("Shortcut Action: Undo", key="shortcut_undo")
     save_focused_line = st.sidebar.button("Shortcut Action: Save Focused Line", key="shortcut_save_focused_line")
+    copy_success = st.sidebar.button("Shortcut Action: Copy Success", key="shortcut_copy_success")
+    copy_failed = st.sidebar.button("Shortcut Action: Copy Failed", key="shortcut_copy_failed")
+    focus_editor = st.sidebar.button("Shortcut Action: Focus Editor", key="shortcut_focus_editor")
 
     if clear_selection:
         st.session_state.selected_node_ids = []
@@ -218,12 +248,14 @@ def render_shortcut_actions():
         st.session_state.connect_nodes = []
         if "selected_lines" in st.session_state:
             st.session_state.selected_lines = {}
+        st.session_state.shortcut_feedback = "Selection cleared"
         st.rerun()
 
     if shortcut_undo and st.session_state.history:
         prev_focus = st.session_state.get("focused_line_id")
         undo()
         restore_focus_after_graph_update(prev_focus)
+        st.session_state.shortcut_feedback = "Undo"
         st.rerun()
 
     if save_focused_line:
@@ -235,10 +267,30 @@ def render_shortcut_actions():
                     old_structure = extract_module_structure_from_text(line.current_text)
                     new_structure = extract_module_structure_from_text(new_text)
                     if old_structure != new_structure:
+                        st.session_state.shortcut_feedback = "Save blocked"
                         st.error("Free edition cannot change module tags.")
                         st.stop()
                 update_line_text(line.id, new_text)
+                st.session_state.shortcut_feedback = "Saved focused line"
                 st.rerun()
+            else:
+                st.session_state.shortcut_feedback = "No changes to save"
+                st.rerun()
+        else:
+            st.session_state.shortcut_feedback = "No focused line"
+            st.rerun()
+
+    if copy_success:
+        st.session_state.shortcut_feedback = "Copied focused line prompt"
+        st.rerun()
+
+    if copy_failed:
+        st.session_state.shortcut_feedback = "Copy failed"
+        st.rerun()
+
+    if focus_editor:
+        st.session_state.shortcut_feedback = "Focused line editor"
+        st.rerun()
 
 def update_line_text(line_id: str, new_text: str):
     push_history()
@@ -539,6 +591,9 @@ with st.sidebar.expander("Keyboard Shortcuts", expanded=False):
         st.caption("Lite-safe: shortcuts are mainly for Focus Edit Mode / one-line editing. Global editing remains restricted.")
     else:
         st.caption("Safe v1 shortcuts only. Destructive global shortcuts are not enabled.")
+
+if st.session_state.get("shortcut_feedback"):
+    st.sidebar.caption(f"Shortcut: {st.session_state.shortcut_feedback}")
 
 if st.sidebar.button("📘 Show Tutorial"):
     st.session_state.show_tutorial = True
