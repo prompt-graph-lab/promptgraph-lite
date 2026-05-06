@@ -12,6 +12,12 @@ The goal is to make prompt editing:
 
 PromptGraph is designed not only for humans, but also for future AI-assisted prompt workflows and agent-driven generation systems.
 
+PromptGraph currently uses Streamlit as a rapid development and validation frontend. The current Lite build focuses on learning, visualization, safe Focus Edit workflows, and validating the core PromptGraph concept.
+
+Keyboard shortcuts are currently experimental in the Streamlit UI. Some browser-level shortcuts may not behave consistently depending on browser focus and Streamlit iframe behavior. Stable editing workflows are available through the visible UI controls, which remain the recommended path for reliable editing.
+
+The long-term design emphasizes separating core prompt operations from the UI so the tool can later support APIs, AI-agent workflows, or possible future frontend options that are more suitable for IDE-style interaction. Streamlit remains the current supported UI during this validation phase.
+
 ---
 
 # What is PromptGraph?
@@ -97,7 +103,8 @@ Future workflow direction includes:
 - Undo/history system
 - Merge identical words
 - Rename/Delete preview
-- Keyboard shortcuts v1
+- Limited / experimental keyboard shortcuts v1
+- Stable button-based editing workflows
 - JSON save/load
 - TXT export
 - Streamlit-based UI
@@ -121,9 +128,9 @@ PromptGraph Pro includes everything in Lite, plus additional advanced workflow f
 
 ## Keyboard Shortcuts v1
 
-Lite-safe shortcut support has been added.
+Lite-safe shortcut support is available as an experimental Streamlit UI convenience. Button-based operations remain the recommended stable path.
 
-Current shortcuts:
+Current experimental shortcuts:
 
 | Shortcut | Action |
 |---|---|
@@ -138,6 +145,8 @@ Lite edition shortcuts are intentionally focused on:
 - Focus Edit workflow
 - safe non-destructive interaction
 
+Global destructive editing remains restricted in Lite, and shortcuts do not bypass Focus Edit requirements.
+
 ---
 
 # Lite vs Pro
@@ -148,10 +157,10 @@ Designed for:
 - learning
 - prompt understanding
 - graph visualization
-- safe editing
+- safe Focus Edit
 - trying the workflow
 
-Lite intentionally restricts some global editing features.
+Lite intentionally restricts global destructive editing features. Negative Prompt v1 is a Pro feature and is not available in Lite.
 
 ---
 
@@ -174,7 +183,7 @@ Pro includes more powerful editing capabilities and workflow features.
 
 Recent Lite improvements include:
 
-- Added keyboard shortcuts v1
+- Added limited / experimental keyboard shortcuts v1
 - Improved Focus Edit workflow
 - Improved Lite editing UX
 - Improved graph editing stability
@@ -274,17 +283,20 @@ run.bat
 
 Planned future directions include:
 
+- Continue validating the PromptGraph workflow in Streamlit
+- Keep stable editing available through visible UI buttons
+- Separate core prompt operations from the UI over time
 - Scene structure system
-- Batch editing
+- Sequence editing
 - Prompt modules
 - AI-assisted prompt operations
 - WD14Tagger integration
 - Image-to-prompt workflow
 - ComfyUI integration
-- Sequence editing
 - Prompt clustering
 - Prompt relationship analysis
 - AI-agent workflow support
+- Possible future frontend options after the core value is validated
 
 ---
 
