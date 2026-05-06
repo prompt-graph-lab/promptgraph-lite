@@ -85,33 +85,152 @@ def sync_text_areas():
             if focus_key in st.session_state:
                 st.session_state[focus_key] = line.current_text
 
+def _shortcut_context():
+    line = get_line_by_id(st.session_state.get("project"), st.session_state.get("focused_line_id"))
+    return {
+        "has_focus": bool(line),
+        "focused_prompt": line.current_text if line else "",
+        "can_undo": len(st.session_state.history) > 0,
+    }
+
 def inject_keyboard_shortcuts():
+    shortcut_context = _shortcut_context()
     components.html(
-        """
+        f"""
         <script>
-        const doc = window.parent.document;
-        if (!doc.getElementById('sd-prompt-editor-shortcuts')) {
-            const scriptTag = doc.createElement('script');
-            scriptTag.id = 'sd-prompt-editor-shortcuts';
-            scriptTag.innerHTML = `
-                document.addEventListener('keydown', function(e) {
-                    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-                    if (e.key === 'Delete' || e.key === 'Backspace') {
-                        const buttons = Array.from(document.querySelectorAll('button'));
-                        const deleteBtn = buttons.find(el => el.innerText.includes('🗑️ Delete Node'));
-                        if (deleteBtn) {
-                            deleteBtn.click();
-                        }
-                    }
-                });
-            `;
-            doc.head.appendChild(scriptTag);
-        }
+        (() => {{
+            const doc = window.parent.document;
+            const labels = {{
+                clear: "Shortcut Action: Clear Selection",
+                undo: "Shortcut Action: Undo",
+                save: "Shortcut Action: Save Focused Line",
+            }};
+
+            window.__promptGraphShortcutState = {{
+                hasFocus: {json.dumps(shortcut_context["has_focus"])},
+                focusedPrompt: {json.dumps(shortcut_context["focused_prompt"])},
+                canUndo: {json.dumps(shortcut_context["can_undo"])},
+            }};
+
+            function findButton(label) {{
+                return Array.from(doc.querySelectorAll("button")).find(
+                    (button) => (button.innerText || "").includes(label)
+                );
+            }}
+
+            function hideShortcutButtons() {{
+                Object.values(labels).forEach((label) => {{
+                    const button = findButton(label);
+                    if (!button) return;
+                    const wrapper = button.closest('[data-testid="stButton"]') || button.parentElement;
+                    if (wrapper) wrapper.style.display = "none";
+                }});
+            }}
+
+            if (!doc.getElementById("promptgraph-shortcuts-v1")) {{
+                const scriptTag = doc.createElement("script");
+                scriptTag.id = "promptgraph-shortcuts-v1";
+                scriptTag.innerHTML = `
+                    document.addEventListener("keydown", async function(e) {{
+                        const state = window.__promptGraphShortcutState || {{}};
+                        const isModifier = e.ctrlKey || e.metaKey;
+                        const key = e.key.toLowerCase();
+                        const tag = e.target ? e.target.tagName : "";
+                        const editable = tag === "INPUT" || tag === "TEXTAREA" || (e.target && e.target.isContentEditable);
+                        const labels = {{
+                            clear: "Shortcut Action: Clear Selection",
+                            undo: "Shortcut Action: Undo",
+                            save: "Shortcut Action: Save Focused Line",
+                        }};
+                        const findButton = (label) => Array.from(document.querySelectorAll("button")).find(
+                            (button) => (button.innerText || "").includes(label)
+                        );
+                        const clickShortcut = (label) => {{
+                            const button = findButton(label);
+                            if (button) button.click();
+                            return Boolean(button);
+                        }};
+                        const focusEditTextArea = () => {{
+                            const textAreas = Array.from(document.querySelectorAll("textarea"));
+                            const textArea = textAreas[textAreas.length - 1];
+                            if (!textArea) return false;
+                            textArea.scrollIntoView({{ behavior: "smooth", block: "center" }});
+                            textArea.focus();
+                            return true;
+                        }};
+
+                        if (e.key === "Escape") {{
+                            if (clickShortcut(labels.clear)) e.preventDefault();
+                            return;
+                        }}
+                        if (isModifier && key === "z") {{
+                            if (editable || !state.canUndo) return;
+                            if (clickShortcut(labels.undo)) e.preventDefault();
+                            return;
+                        }}
+                        if (isModifier && key === "s") {{
+                            if (!state.hasFocus) return;
+                            e.preventDefault();
+                            clickShortcut(labels.save);
+                            return;
+                        }}
+                        if ((e.key === "F2" || e.key === "Enter") && state.hasFocus && !editable && !isModifier) {{
+                            if (focusEditTextArea()) e.preventDefault();
+                            return;
+                        }}
+                        if (isModifier && key === "c" && state.hasFocus && !editable) {{
+                            if (!navigator.clipboard) return;
+                            e.preventDefault();
+                            try {{
+                                await navigator.clipboard.writeText(state.focusedPrompt || "");
+                            }} catch (err) {{}}
+                        }}
+                    }});
+                `;
+                doc.head.appendChild(scriptTag);
+            }}
+
+            hideShortcutButtons();
+            setTimeout(hideShortcutButtons, 250);
+        }})();
         </script>
         """,
         height=0,
         width=0,
     )
+
+def render_shortcut_actions():
+    clear_selection = st.sidebar.button("Shortcut Action: Clear Selection", key="shortcut_clear_selection")
+    shortcut_undo = st.sidebar.button("Shortcut Action: Undo", key="shortcut_undo")
+    save_focused_line = st.sidebar.button("Shortcut Action: Save Focused Line", key="shortcut_save_focused_line")
+
+    if clear_selection:
+        st.session_state.selected_node_ids = []
+        st.session_state.connect_mode = False
+        st.session_state.connect_nodes = []
+        if "selected_lines" in st.session_state:
+            st.session_state.selected_lines = {}
+        st.rerun()
+
+    if shortcut_undo and st.session_state.history:
+        prev_focus = st.session_state.get("focused_line_id")
+        undo()
+        restore_focus_after_graph_update(prev_focus)
+        st.rerun()
+
+    if save_focused_line:
+        line = get_line_by_id(st.session_state.get("project"), st.session_state.get("focused_line_id"))
+        if line:
+            new_text = st.session_state.get(f"focus_text_{line.id}", line.current_text)
+            if new_text != line.current_text:
+                if st.session_state.edition == "FREE":
+                    old_structure = extract_module_structure_from_text(line.current_text)
+                    new_structure = extract_module_structure_from_text(new_text)
+                    if old_structure != new_structure:
+                        st.error("Free edition cannot change module tags.")
+                        st.stop()
+                update_line_text(line.id, new_text)
+                st.rerun()
 
 def update_line_text(line_id: str, new_text: str):
     push_history()
@@ -363,6 +482,7 @@ if st.session_state.show_tutorial:
 st.sidebar.title("PromptGraph Lite")
 
 inject_keyboard_shortcuts()
+render_shortcut_actions()
 
 # Directory loading
 target_dir = st.sidebar.text_input("Source Directory", st.session_state.settings.get("last_source_directory", "./dummy_data"))
@@ -401,6 +521,16 @@ elif is_free():
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Help")
+with st.sidebar.expander("Keyboard Shortcuts", expanded=False):
+    st.markdown("- `Esc`: Clear graph selection")
+    st.markdown("- `Ctrl/Cmd+Z`: Undo when not typing")
+    st.markdown("- `Ctrl/Cmd+S`: Save focused line")
+    st.markdown("- `Enter` / `F2`: Focus the line editor")
+    st.markdown("- `Ctrl/Cmd+C`: Copy focused line prompt")
+    if is_free():
+        st.caption("Lite-safe: shortcuts are mainly for Focus Edit Mode / one-line editing. Global editing remains restricted.")
+    else:
+        st.caption("Safe v1 shortcuts only. Destructive global shortcuts are not enabled.")
 
 if st.sidebar.button("📘 Show Tutorial"):
     st.session_state.show_tutorial = True
