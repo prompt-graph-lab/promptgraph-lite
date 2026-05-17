@@ -10,7 +10,7 @@ import uuid
 import copy
 import json
 from core.comfyui import generate_image_with_progress
-from core.settings import load_settings, save_settings, EDITION
+from core.settings import load_settings, save_settings, get_last_project_path, get_recent_projects, remember_project, EDITION
 import sys
 from wordcloud import WordCloud
 import matplotlib.pyplot as plt
@@ -48,6 +48,8 @@ if "history" not in st.session_state:
     st.session_state.history = []
 if "project" not in st.session_state:
     st.session_state.project = None
+if "current_project_path" not in st.session_state:
+    st.session_state.current_project_path = st.session_state.settings.get("last_project", "")
 if "selected_node_ids" not in st.session_state:
     st.session_state.selected_node_ids = []
 if "disabled_modules" not in st.session_state:
@@ -88,6 +90,29 @@ def sync_text_areas():
             focus_key = f"focus_text_{line.id}"
             if focus_key in st.session_state:
                 st.session_state[focus_key] = line.current_text
+
+def load_project_json_into_session(project_path: str) -> bool:
+    if not os.path.exists(project_path):
+        st.warning(f"Project file not found: {project_path}")
+        return False
+
+    st.session_state.history = []
+    project = load_project_from_json(project_path)
+    project = build_graph(project)
+    st.session_state.project = project
+    st.session_state.current_project_path = os.path.abspath(project_path)
+    st.session_state.focused_line_id = None
+    st.session_state.selected_node_ids = []
+    st.session_state.connect_mode = False
+    st.session_state.connect_nodes = []
+    sync_text_areas()
+
+    st.session_state.settings = remember_project(
+        st.session_state.settings,
+        st.session_state.current_project_path,
+    )
+    save_settings(st.session_state.settings)
+    return True
 
 def get_line_by_id(project, line_id):
     if not project or not line_id:
@@ -390,6 +415,48 @@ def continue_story_from_line(line_id: str) -> str | None:
 
 def get_candidate_image_paths(line) -> list[str]:
     return [_candidate_path(candidate) for candidate in _get_line_generated_candidates(line)]
+
+def count_line_candidates(line) -> int:
+    candidate_paths = []
+    candidates = getattr(line, "generated_candidates", None)
+    legacy_paths = getattr(line, "candidate_image_paths", None)
+    if isinstance(candidates, list):
+        candidate_paths.extend(_candidate_path(candidate) for candidate in candidates)
+    if isinstance(legacy_paths, list):
+        candidate_paths.extend(_candidate_path(candidate) for candidate in legacy_paths)
+    return len({path for path in candidate_paths if path})
+
+def project_stats(project) -> dict:
+    if not project:
+        return {
+            "source_directory": "",
+            "active_lines": 0,
+            "branch_lines": 0,
+            "continued_lines": 0,
+            "candidate_images": 0,
+            "after_images": 0,
+        }
+
+    active_lines = [
+        line for line in getattr(project, "prompt_lines", [])
+        if not getattr(line, "deleted", False)
+    ]
+    continued_lines = [
+        line for line in active_lines
+        if getattr(line, "continued_from", None)
+    ]
+    branch_lines = [
+        line for line in active_lines
+        if getattr(line, "duplicated_from", None) and not getattr(line, "continued_from", None)
+    ]
+    return {
+        "source_directory": getattr(project, "source_directory", "") or "",
+        "active_lines": len(active_lines),
+        "branch_lines": len(branch_lines),
+        "continued_lines": len(continued_lines),
+        "candidate_images": sum(count_line_candidates(line) for line in active_lines),
+        "after_images": sum(1 for line in active_lines if getattr(line, "generated_image_path", None)),
+    }
 
 REGULAR_COMFY_WORKFLOW_ERROR = (
     "This appears to be a regular ComfyUI workflow JSON. Please use API-format workflow_api.json "
@@ -815,6 +882,96 @@ st.sidebar.caption("既存資産を読み込み、Prompt LineageをFocus Editで
 inject_keyboard_shortcuts()
 render_shortcut_actions()
 
+st.sidebar.markdown("---")
+st.sidebar.subheader("Project Management")
+st.sidebar.caption("Save this story workspace and resume the lineage project later.")
+
+current_project_path = st.session_state.get("current_project_path") or ""
+if current_project_path:
+    st.sidebar.code(current_project_path, language="text")
+elif st.session_state.project:
+    st.sidebar.info("Unsaved lineage project")
+else:
+    st.sidebar.info("No project loaded")
+
+overview = project_stats(st.session_state.project)
+with st.sidebar.expander("Project Overview", expanded=bool(st.session_state.project)):
+    st.caption("Track lines, branches, continuations, and generated candidates.")
+    st.caption(f"Source: {overview['source_directory'] or '(not set)'}")
+    st.caption(f"Project JSON: {current_project_path or '(not saved yet)'}")
+    metric_cols = st.columns(2)
+    metric_cols[0].metric("Active Lines", overview["active_lines"])
+    metric_cols[1].metric("Branches", overview["branch_lines"])
+    metric_cols = st.columns(2)
+    metric_cols[0].metric("Continued", overview["continued_lines"])
+    metric_cols[1].metric("Candidates", overview["candidate_images"])
+    st.metric("After Images", overview["after_images"])
+
+last_project_path = get_last_project_path(st.session_state.settings)
+recent_projects = get_recent_projects(st.session_state.settings)
+project_file_default = current_project_path or last_project_path or "project.json"
+json_path_default = current_project_path or "project.json"
+
+project_cols = st.sidebar.columns(2)
+with project_cols[0]:
+    if st.button("Open Last", disabled=not last_project_path, key="open_last_project"):
+        if load_project_json_into_session(last_project_path):
+            st.success("Project loaded.")
+            st.rerun()
+with project_cols[1]:
+    quick_save_disabled = not bool(st.session_state.project)
+    if st.button("Save", disabled=quick_save_disabled, key="quick_save_project"):
+        save_project_to_json(st.session_state.project, json_path_default)
+        st.session_state.current_project_path = os.path.abspath(json_path_default)
+        st.session_state.settings = remember_project(
+            st.session_state.settings,
+            st.session_state.current_project_path,
+        )
+        save_settings(st.session_state.settings)
+        st.success("Project saved.")
+
+with st.sidebar.expander("Open Project", expanded=False):
+    st.markdown("**Recent Projects**")
+    if recent_projects:
+        recent_options = [item["path"] for item in recent_projects]
+        recent_project_path = st.selectbox(
+            "Recent Projects",
+            recent_options,
+            format_func=lambda path: next(
+                (item["name"] for item in recent_projects if item["path"] == path),
+                path,
+            ),
+            label_visibility="collapsed",
+        )
+        st.caption(recent_project_path)
+        if st.button("Open Recent Project"):
+            if load_project_json_into_session(recent_project_path):
+                st.success("Project loaded.")
+                st.rerun()
+    else:
+        st.caption("No recent projects yet.")
+
+    st.markdown("**Other Project (JSON file)**")
+    open_project_path = st.text_input("Project (JSON file)", project_file_default, key="open_project_path")
+    if st.button("Open Project"):
+        if load_project_json_into_session(open_project_path):
+            st.success("Project loaded.")
+            st.rerun()
+
+with st.sidebar.expander("Save As", expanded=False):
+    st.caption("Save this lineage workspace as JSON, including candidates and continued lines.")
+    json_path = st.text_input("Project (JSON file)", json_path_default, key="save_project_json_path")
+    if st.button("Save Current Project"):
+        if st.session_state.project:
+            save_project_to_json(st.session_state.project, json_path)
+            st.session_state.current_project_path = os.path.abspath(json_path)
+            st.session_state.settings = remember_project(
+                st.session_state.settings,
+                st.session_state.current_project_path,
+            )
+            save_settings(st.session_state.settings)
+            st.success("Project saved.")
+
 # Directory loading
 st.sidebar.markdown("---")
 st.sidebar.subheader("1. Import / Load Assets")
@@ -828,6 +985,7 @@ if st.sidebar.button("Load Directory"):
             project = load_directory(target_dir, max_depth=None)
             project = build_graph(project)
         st.session_state.project = project
+        st.session_state.current_project_path = ""
         st.session_state.focused_line_id = None
         st.session_state.selected_node_ids = []
         st.session_state.connect_mode = False
@@ -1012,30 +1170,6 @@ if st.sidebar.button("Export Combined TXT"):
         st.sidebar.success(f"Exported to {export_path}")
 
 st.sidebar.caption("Lite supports single-image generation from Focus Edit. Batch generation remains a Pro feature.")
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("5. Project Management")
-json_path = st.sidebar.text_input("Save Project (JSON)", "project.json")
-col_s1, col_s2 = st.sidebar.columns(2)
-with col_s1:
-    # 「Free版でのExport/Save許可はプレ公開方針。必要なら後で制限する。」
-    if st.button("Save JSON"):
-        if st.session_state.project:
-            save_project_to_json(st.session_state.project, json_path)
-            st.success("Project saved.")
-with col_s2:
-    if st.button("Load JSON"):
-        if os.path.exists(json_path):
-            st.session_state.history = []
-            project = load_project_from_json(json_path)
-            project = build_graph(project)
-            st.session_state.project = project
-            st.session_state.focused_line_id = None
-            st.session_state.selected_node_ids = []
-            st.session_state.connect_mode = False
-            st.success("Project loaded.")
-        else:
-            st.error("File not found")
 
 if not st.session_state.project:
     st.info("Start with Import / Load Assets in the sidebar, or load a saved project JSON from Project Management.")
