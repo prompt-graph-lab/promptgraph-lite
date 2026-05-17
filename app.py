@@ -349,6 +349,45 @@ def duplicate_line(line_id: str, focus_new_branch: bool = False) -> str | None:
     sync_text_areas()
     return new_line_id
 
+def continue_story_from_line(line_id: str) -> str | None:
+    source_line = next((line for line in st.session_state.project.prompt_lines if line.id == line_id), None)
+    if not source_line:
+        return None
+
+    push_history()
+    new_lines = []
+    new_line_id = None
+    continuation_reference = getattr(source_line, "generated_image_path", None) or getattr(source_line, "image_path", None)
+
+    for line in st.session_state.project.prompt_lines:
+        new_lines.append(line)
+        if line.id == line_id:
+            new_line = copy.deepcopy(line)
+            new_line.id = f"line_{uuid.uuid4().hex[:8]}"
+            new_line.duplicated_from = line.id
+            new_line.continued_from = line.id
+            new_line.edited = True
+            new_line.image_path = continuation_reference
+            new_line.generated_image_path = None
+            new_line.generated_candidates = []
+            new_line.candidate_image_paths = []
+            new_line.selected_candidate_path = None
+            new_line_id = new_line.id
+            new_lines.append(new_line)
+
+    if not new_line_id:
+        return None
+
+    st.session_state.project.prompt_lines = new_lines
+    for i, l in enumerate(st.session_state.project.prompt_lines):
+        l.current_index = i
+
+    st.session_state.project = build_graph(st.session_state.project)
+    restore_focus_after_graph_update(new_line_id)
+    st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+    sync_text_areas()
+    return new_line_id
+
 def get_candidate_image_paths(line) -> list[str]:
     return [_candidate_path(candidate) for candidate in _get_line_generated_candidates(line)]
 
@@ -1707,7 +1746,7 @@ with col2:
                 st.rerun()
                 
             st.markdown(f"### 🎯 Focus Edit / Branch Story: `{target_line.original_file_name}`")
-            st.caption("この行だけを編集し、Create Branchで既存資産から別案やストーリー分岐を作ります。")
+            st.caption("この行だけを編集し、Create Branchで分岐し、Continue Storyで次のシーンへ進めます。")
             focus_visible_line_ids = [line.id for line in project.prompt_lines if not line.deleted]
             focus_visible_index = focus_visible_line_ids.index(target_line.id)
             c_back, c_up, c_down = st.columns([2, 1, 1])
@@ -1835,6 +1874,14 @@ with col2:
                     else:
                         st.info("No after image selected yet.")
 
+            st.markdown("#### Continue Story")
+            st.caption("Create the next story scene from this result.")
+            if st.button("Continue Story", type="primary"):
+                new_line_id = continue_story_from_line(target_line.id)
+                if new_line_id:
+                    st.session_state.branch_feedback = "Created the next story line and moved Focus Edit to it."
+                st.rerun()
+
             st.markdown("#### Generate / Compare")
             render_lite_comfy_workflow_debug_preview(target_line)
             st.caption("Lite runs one focused-line generation at a time. Batch generation and scene pools stay Pro-only.")
@@ -1913,7 +1960,9 @@ with col2:
                 title = f"[{l.original_file_name}] Line {l.original_index}"
                 if l.edited:
                     title += " (Edited)"
-                if l.duplicated_from:
+                if getattr(l, "continued_from", None):
+                    title += " (Continued)"
+                elif l.duplicated_from:
                     title += " (Branch)"
                     
                 col_chk, col_exp = st.columns([0.05, 0.95])

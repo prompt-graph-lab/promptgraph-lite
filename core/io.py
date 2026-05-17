@@ -143,6 +143,9 @@ def save_project_to_json(project: Project, output_path: str):
         selected_candidate_path = getattr(line, "selected_candidate_path", None)
         if selected_candidate_path:
             line_data["selected_candidate_path"] = selected_candidate_path
+        continued_from = getattr(line, "continued_from", None)
+        if continued_from:
+            line_data["continued_from"] = continued_from
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, cls=SetEncoder, indent=2, ensure_ascii=False)
 
@@ -163,6 +166,7 @@ def load_project_from_json(json_path: str) -> Project:
         pl.generated_candidates = candidates
         pl.candidate_image_paths = [candidate["path"] for candidate in candidates]
         pl.selected_candidate_path = l_data.get("selected_candidate_path") or getattr(pl, "generated_image_path", None)
+        pl.continued_from = l_data.get("continued_from")
         project.prompt_lines.append(pl)
         
     valid_pn_keys = {f.name for f in dataclasses.fields(PromptNode)}
