@@ -24,8 +24,8 @@ PromptGraph Lite is the entry point for the core PromptGraph concept:
 
 1. **Import Existing Assets**: Load existing `.txt` prompt files and same-name PNG/JPG images from a directory.
 2. **Prompt Lineage**: Review each prompt as a reusable line in a larger collection or story sequence.
-3. **Focus Edit / Branch Story**: Safely edit one prompt line at a time and branch from existing lines to create alternate story directions.
-4. **Export / Generate Result**: Generate one focused-line candidate at a time or export active prompts to combined TXT. Batch generation is Pro-only.
+3. **Focus Edit / Branch Story**: Safely edit one prompt line at a time, branch from existing lines, and continue the story into the next line.
+4. **Export / Generate Result**: Generate one focused-line candidate at a time, choose After/Reference images, or export active prompts to combined TXT. Batch generation is Pro-only.
 5. **Project Management**: Save and reload JSON projects without changing the project file format.
 6. **Graph / Prompt Cloud Preview**: Inspect repeated words, relationships, and future Pro visualization potential.
 
@@ -156,6 +156,7 @@ This enables future support for:
 - Focus Edit Mode
 - Prompt line editing
 - Single-line branch creation from existing prompt lines
+- Continue Story line creation from a focused prompt line
 - Single-line reorder for story/lineage ordering
 - Single-image ComfyUI generation from Focus Edit
 - Candidate image assignment as After or Reference
