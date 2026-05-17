@@ -24,7 +24,7 @@ PromptGraph Lite is the entry point for the core PromptGraph concept:
 
 1. **Import Existing Assets**: Load existing `.txt` prompt files and same-name PNG/JPG images from a directory.
 2. **Prompt Lineage**: Review each prompt as a reusable line in a larger collection or story sequence.
-3. **Focus Edit / Branch Story**: Safely edit one prompt line at a time and duplicate lines to create branches.
+3. **Focus Edit / Branch Story**: Safely edit one prompt line at a time and branch from existing lines to create alternate story directions.
 4. **Export / Generate Result**: Export active prompts to combined TXT for external generation. Direct ComfyUI execution is Pro-only.
 5. **Project Management**: Save and reload JSON projects without changing the project file format.
 6. **Graph / Prompt Cloud Preview**: Inspect repeated words, relationships, and future Pro visualization potential.
@@ -155,7 +155,7 @@ This enables future support for:
 - Prompt Cloud / word frequency visualization
 - Focus Edit Mode
 - Prompt line editing
-- Single-line duplication for branching
+- Single-line branch creation from existing prompt lines
 - Single-line reorder for story/lineage ordering
 - Undo/history system
 - Merge identical words
