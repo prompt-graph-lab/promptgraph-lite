@@ -43,11 +43,13 @@ def load_directory(dir_path: str, max_depth: int = None) -> Project:
                 line_id = f"line_{line_index}"
                 
                 gen_img_path = None
+                candidate_image_paths = []
                 output_dir = os.path.join(dir_path, "generated")
                 if os.path.exists(output_dir):
                     cands = glob.glob(os.path.join(output_dir, f"gen_{line_id}_*.png"))
                     if cands:
                         cands.sort(key=os.path.getmtime, reverse=True)
+                        candidate_image_paths = list(reversed(cands))
                         gen_img_path = cands[0]
                         
                 prompt_line = PromptLine(
@@ -61,6 +63,7 @@ def load_directory(dir_path: str, max_depth: int = None) -> Project:
                     image_path=image_path,
                     generated_image_path=gen_img_path
                 )
+                prompt_line.candidate_image_paths = candidate_image_paths
                 project.prompt_lines.append(prompt_line)
                 line_index += 1
         except Exception as e:
@@ -97,6 +100,10 @@ class SetEncoder(json.JSONEncoder):
 
 def save_project_to_json(project: Project, output_path: str):
     data = asdict(project)
+    for line_data, line in zip(data.get("prompt_lines", []), project.prompt_lines):
+        candidates = getattr(line, "candidate_image_paths", [])
+        if candidates:
+            line_data["candidate_image_paths"] = list(candidates)
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, cls=SetEncoder, indent=2, ensure_ascii=False)
 
@@ -111,6 +118,7 @@ def load_project_from_json(json_path: str) -> Project:
     for l_data in data.get("prompt_lines", []):
         filtered_data = {k: v for k, v in l_data.items() if k in valid_pl_keys}
         pl = PromptLine(**filtered_data)
+        pl.candidate_image_paths = list(l_data.get("candidate_image_paths", []))
         project.prompt_lines.append(pl)
         
     valid_pn_keys = {f.name for f in dataclasses.fields(PromptNode)}

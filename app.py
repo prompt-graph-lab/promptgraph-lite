@@ -349,6 +349,56 @@ def duplicate_line(line_id: str, focus_new_branch: bool = False) -> str | None:
     sync_text_areas()
     return new_line_id
 
+def get_candidate_image_paths(line) -> list[str]:
+    candidates = getattr(line, "candidate_image_paths", [])
+    if not isinstance(candidates, list):
+        candidates = []
+
+    existing = []
+    for path in candidates:
+        if path and path not in existing:
+            existing.append(path)
+
+    line.candidate_image_paths = existing
+    return line.candidate_image_paths
+
+def add_candidate_image(line, image_path: str):
+    candidates = get_candidate_image_paths(line)
+    if image_path and image_path not in candidates:
+        candidates.append(image_path)
+
+def set_candidate_as_after(line, image_path: str):
+    push_history()
+    add_candidate_image(line, image_path)
+    line.generated_image_path = image_path
+
+def set_candidate_as_reference(line, image_path: str):
+    push_history()
+    add_candidate_image(line, image_path)
+    line.image_path = image_path
+
+def build_lite_generation_workflow(target_line):
+    if not os.path.exists(st.session_state.comfy_workflow_path):
+        raise FileNotFoundError(f"Workflow JSON not found at {st.session_state.comfy_workflow_path}")
+
+    with open(st.session_state.comfy_workflow_path, 'r', encoding='utf-8') as f:
+        wf_str = f.read()
+
+    mapping = st.session_state.settings.get("comfy_mapping")
+    fallback_prompt = st.session_state.settings.get("fallback_prompt", "(masterpiece:1.0)")
+    if mapping and "group_map" in mapping:
+        workflow_json = json.loads(wf_str)
+        from core.comfyui import build_prompt_by_group, inject_prompt_to_workflow
+        grouped = build_prompt_by_group(st.session_state.project, target_line, st.session_state.disabled_modules)
+        return inject_prompt_to_workflow(workflow_json, grouped, mapping, fallback_prompt=fallback_prompt)
+
+    if "__PROMPT__" not in wf_str:
+        st.warning("The workflow JSON does not contain '__PROMPT__'. The prompt will not be injected.")
+
+    active_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
+    escaped_prompt = json.dumps(", ".join(active_tokens))[1:-1]
+    return json.loads(wf_str.replace("__PROMPT__", escaped_prompt))
+
 def move_line(line_id: str, visible_line_ids: list[str], direction: str) -> bool:
     if line_id not in visible_line_ids:
         return False
@@ -541,7 +591,7 @@ if st.session_state.show_tutorial:
     1. **Import Existing Assets**: 既存の `.txt` と同名画像を読み込みます。
     2. **Prompt Lineage**: Linesでプロンプト行を確認し、編集対象を選びます。
     3. **Focus Edit / Branch Story**: 既存行からBranchを作り、1行ずつ安全に編集します。
-    4. **Export / Generate**: 編集結果をTXTに書き出します。直接生成はPro機能です。
+    4. **Export / Generate**: Focus Editから1枚ずつ生成し、候補をAfter/Referenceに採用できます。
     5. **Project Management**: JSONで長期作業用に保存・再開します。
 
     GraphとPrompt Cloudは、プロンプトのつながりやProで広がる編集可能性を確認するプレビューです。
@@ -558,7 +608,7 @@ if st.session_state.show_tutorial:
 
     ## ⚠ Free版の制限
 
-    - 一括編集、Module作成、直接ComfyUI実行はPro機能です
+    - 一括編集、Module作成、ComfyUIの一括生成はPro機能です
     - LiteではFocus Editを中心に、既存資産を安全に理解・編集します
 
     ---
@@ -776,7 +826,7 @@ if st.sidebar.button("Export Combined TXT"):
         save_settings(st.session_state.settings)
         st.sidebar.success(f"Exported to {export_path}")
 
-st.sidebar.caption("Direct ComfyUI generation remains a Pro feature; Lite exports prompts for external use.")
+st.sidebar.caption("Lite supports single-image generation from Focus Edit. Batch generation remains a Pro feature.")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("5. Project Management")
@@ -807,8 +857,8 @@ if not st.session_state.project:
     st.stop()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Generate Settings (Pro Preview)")
-st.sidebar.caption("Lite keeps generation setup visible as future potential, but does not run Pro-only generation.")
+st.sidebar.subheader("Generate Settings")
+st.sidebar.caption("Used by Lite single-candidate generation. Batch and automation loops remain Pro-only.")
 
 def update_comfy_settings():
     st.session_state.settings["comfyui_url"] = st.session_state.comfy_url
@@ -1627,71 +1677,74 @@ with col2:
             with st.expander("Imported / Generated Image Preview", expanded=False):
                 img_c1, img_c2 = st.columns(2)
                 with img_c1:
-                    st.markdown("**Original Image**")
+                    st.markdown("**Reference Image**")
                     if target_line.image_path and os.path.exists(target_line.image_path):
                         st.image(target_line.image_path, width="stretch")
                     else:
-                        st.info("No original image.")
+                        st.info("No reference image.")
                 with img_c2:
-                    st.markdown("**Generated Image**")
+                    st.markdown("**After Image**")
                     if getattr(target_line, "generated_image_path", None) and os.path.exists(target_line.generated_image_path):
                         st.image(target_line.generated_image_path, width="stretch")
                     else:
-                        st.info("No generated image yet.")
-                    
-            st.caption("Regeneration from Lite is represented by export/manual copy. Direct ComfyUI execution is Pro-only.")
-            if st.button("🎨 Generate with ComfyUI (Pro)", type="primary"):
-                if st.session_state.edition == "FREE":
-                    show_upgrade_dialog("Direct ComfyUI execution and progress tracking are available in the Pro edition.")
-                    st.stop()
-                
-                if not os.path.exists(st.session_state.comfy_workflow_path):
-                    st.error(f"Workflow JSON not found at {st.session_state.comfy_workflow_path}")
-                else:
-                    try:
-                        with open(st.session_state.comfy_workflow_path, 'r', encoding='utf-8') as f:
-                            wf_str = f.read()
-                            
-                        mapping = st.session_state.settings.get("comfy_mapping")
-                        fallback_prompt = st.session_state.settings.get("fallback_prompt", "(masterpiece:1.0)")
-                        if mapping and "group_map" in mapping:
-                            workflow_json = json.loads(wf_str)
-                            from core.comfyui import build_prompt_by_group, inject_prompt_to_workflow
-                            grouped = build_prompt_by_group(st.session_state.project, target_line, st.session_state.disabled_modules)
-                            workflow_json = inject_prompt_to_workflow(workflow_json, grouped, mapping, fallback_prompt=fallback_prompt)
-                        else:
-                            if "__PROMPT__" not in wf_str:
-                                st.warning("The workflow JSON does not contain '__PROMPT__'. The prompt will not be injected.")
-                            
-                            active_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
-                            escaped_prompt = json.dumps(", ".join(active_tokens))[1:-1]
-                            wf_str = wf_str.replace("__PROMPT__", escaped_prompt)
-                            workflow_json = json.loads(wf_str)
-                        
-                        output_dir = os.path.join(st.session_state.project.source_directory, "generated")
-                        
-                        progress_bar = st.progress(0.0)
-                        status_text = st.empty()
-                        
-                        gen_path = None
-                        for status in generate_image_with_progress(
-                            workflow_json, 
-                            st.session_state.comfy_url, 
-                            output_dir, 
-                            f"gen_{target_line.id}"
-                        ):
-                            if "value" in status:
-                                progress_bar.progress(status["value"])
-                            if "text" in status:
-                                status_text.markdown(f"**Status:** {status['text']}")
-                            if status.get("type") == "done":
-                                gen_path = status.get("path")
-                                
-                        if gen_path:
-                            target_line.generated_image_path = gen_path
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"Generation failed: {e}")
+                        st.info("No after image selected yet.")
+
+            st.markdown("### 🎨 Lite Generation Candidates")
+            st.caption("Generate one image from this focused line, keep it as a Candidate, then assign it as After or Reference.")
+            if st.button("Generate Single Candidate with ComfyUI", type="primary"):
+                try:
+                    workflow_json = build_lite_generation_workflow(target_line)
+                    output_dir = os.path.join(st.session_state.project.source_directory or ".", "generated")
+
+                    progress_bar = st.progress(0.0)
+                    status_text = st.empty()
+
+                    gen_path = None
+                    for status in generate_image_with_progress(
+                        workflow_json,
+                        st.session_state.comfy_url,
+                        output_dir,
+                        f"gen_{target_line.id}"
+                    ):
+                        if "value" in status:
+                            progress_bar.progress(status["value"])
+                        if "text" in status:
+                            status_text.markdown(f"**Status:** {status['text']}")
+                        if status.get("type") == "done":
+                            gen_path = status.get("path")
+
+                    if gen_path:
+                        push_history()
+                        add_candidate_image(target_line, gen_path)
+                        st.success("Generated one candidate image for this prompt line.")
+                        st.rerun()
+                except Exception as e:
+                    st.error(f"Lite single-image generation failed: {e}")
+
+            candidate_paths = get_candidate_image_paths(target_line)
+            existing_candidates = [path for path in candidate_paths if path and os.path.exists(path)]
+            missing_candidates = [path for path in candidate_paths if path and not os.path.exists(path)]
+            if missing_candidates:
+                st.caption(f"{len(missing_candidates)} saved candidate path(s) are missing on disk.")
+
+            if existing_candidates:
+                with st.expander("Candidate Images", expanded=True):
+                    for candidate_index, candidate_path in enumerate(reversed(existing_candidates)):
+                        st.image(candidate_path, width="stretch")
+                        st.caption(candidate_path)
+                        ca, cr = st.columns(2)
+                        with ca:
+                            if st.button("Set as After", key=f"after_{target_line.id}_{candidate_index}"):
+                                set_candidate_as_after(target_line, candidate_path)
+                                st.success("Candidate set as After image.")
+                                st.rerun()
+                        with cr:
+                            if st.button("Set as Reference", key=f"ref_{target_line.id}_{candidate_index}"):
+                                set_candidate_as_reference(target_line, candidate_path)
+                                st.success("Candidate set as Reference image.")
+                                st.rerun()
+            else:
+                st.info("No candidate images yet. Generate one candidate to start the next lineage step.")
                 
         else:
             visible_line_ids = [line.id for line in display_lines]
