@@ -512,7 +512,7 @@ def build_lite_generation_workflow(target_line):
     injection_line = copy.deepcopy(target_line)
     injection_line.current_text = ", ".join(active_tokens)
 
-    if mapping and "group_map" in mapping:
+    if isinstance(mapping, dict) and "group_map" in mapping:
         workflow_json = json.loads(wf_str)
         _validate_api_comfy_workflow(workflow_json)
         from core.comfyui import build_prompt_by_group, inject_prompt_to_workflow
