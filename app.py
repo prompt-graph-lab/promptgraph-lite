@@ -62,6 +62,8 @@ if "show_tutorial" not in st.session_state:
     st.session_state.show_tutorial = True
 if "shortcut_feedback" not in st.session_state:
     st.session_state.shortcut_feedback = ""
+if "branch_feedback" not in st.session_state:
+    st.session_state.branch_feedback = ""
 
 def push_history():
     if st.session_state.project:
@@ -318,9 +320,10 @@ def delete_line(line_id: str):
     # Check if selected nodes still exist
     st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
 
-def duplicate_line(line_id: str):
+def duplicate_line(line_id: str, focus_new_branch: bool = False) -> str | None:
     push_history()
     new_lines = []
+    new_line_id = None
     for line in st.session_state.project.prompt_lines:
         new_lines.append(line)
         if line.id == line_id:
@@ -328,16 +331,23 @@ def duplicate_line(line_id: str):
             new_line.id = f"line_{uuid.uuid4().hex[:8]}"
             new_line.duplicated_from = line.id
             new_line.edited = True
+            new_line_id = new_line.id
             new_lines.append(new_line)
-            
+
+    if not new_line_id:
+        return None
+
     st.session_state.project.prompt_lines = new_lines
     # indexの振り直し
     for i, l in enumerate(st.session_state.project.prompt_lines):
         l.current_index = i
-    
-    prev_focus = st.session_state.get("focused_line_id")
+
+    prev_focus = new_line_id if focus_new_branch else st.session_state.get("focused_line_id")
     st.session_state.project = build_graph(st.session_state.project)
     restore_focus_after_graph_update(prev_focus)
+    st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+    sync_text_areas()
+    return new_line_id
 
 def move_line(line_id: str, visible_line_ids: list[str], direction: str) -> bool:
     if line_id not in visible_line_ids:
@@ -530,7 +540,7 @@ if st.session_state.show_tutorial:
 
     1. **Import Existing Assets**: 既存の `.txt` と同名画像を読み込みます。
     2. **Prompt Lineage**: Linesでプロンプト行を確認し、編集対象を選びます。
-    3. **Focus Edit / Branch Story**: 1行を安全に編集・複製して派生を作ります。
+    3. **Focus Edit / Branch Story**: 既存行からBranchを作り、1行ずつ安全に編集します。
     4. **Export / Generate**: 編集結果をTXTに書き出します。直接生成はPro機能です。
     5. **Project Management**: JSONで長期作業用に保存・再開します。
 
@@ -1413,8 +1423,11 @@ with col2:
 
     with tab1:
         st.subheader("Prompt Lineage")
-        st.caption("読み込んだプロンプトを行単位の系譜として確認します。Focus Editで1行に入り、複製で派生を作ります。")
+        st.caption("読み込んだプロンプトを行単位の系譜として確認します。Branchで既存行から派生案を作り、Focus Editで編集します。")
         st.caption("Use ↑ / ↓ on each line to adjust story order. Reorder is single-line and Lite-safe.")
+        if st.session_state.get("branch_feedback"):
+            st.success(st.session_state.branch_feedback)
+            st.session_state.branch_feedback = ""
         
         display_lines = [l for l in project.prompt_lines if not l.deleted]
         
@@ -1450,7 +1463,7 @@ with col2:
                 st.session_state.selected_lines = {}
                 st.rerun()
         with c_dup:
-            if st.button("📋 Duplicate Selected Lines"):
+            if st.button("📋 Batch Duplicate Selected Lines (Pro)"):
                 if not require_pro("Batch line operations are available in Pro."):
                     st.stop()
                 
@@ -1498,7 +1511,7 @@ with col2:
                 st.rerun()
                 
             st.markdown(f"### 🎯 Focus Edit / Branch Story: `{target_line.original_file_name}`")
-            st.caption("この行だけを編集し、既存資産から別案やストーリー分岐を作ります。")
+            st.caption("この行だけを編集し、Create Branchで既存資産から別案やストーリー分岐を作ります。")
             focus_visible_line_ids = [line.id for line in project.prompt_lines if not line.deleted]
             focus_visible_index = focus_visible_line_ids.index(target_line.id)
             c_back, c_up, c_down = st.columns([2, 1, 1])
@@ -1585,7 +1598,7 @@ with col2:
             
             st.markdown("---")
             new_text = st.text_area("Edit Prompt", target_line.current_text, key=f"focus_text_{target_line.id}", height=150)
-            c1, c2 = st.columns(2)
+            c1, c2, c3 = st.columns([1, 1, 1])
             with c1:
                 if new_text != target_line.current_text:
                     if st.button("💾 Save Changes", type="primary"):
@@ -1598,6 +1611,12 @@ with col2:
                         update_line_text(target_line.id, new_text)
                         st.rerun()
             with c2:
+                if st.button("🌱 Create Branch from this Line", type="primary"):
+                    new_line_id = duplicate_line(target_line.id, focus_new_branch=True)
+                    if new_line_id:
+                        st.session_state.branch_feedback = "Created a new branch from the focused line."
+                    st.rerun()
+            with c3:
                 if st.button("✨ Merge Duplicate Words"):
                     push_history()
                     prev_focus = st.session_state.get("focused_line_id")
@@ -1681,7 +1700,7 @@ with col2:
                 if l.edited:
                     title += " (Edited)"
                 if l.duplicated_from:
-                    title += " (Duplicated)"
+                    title += " (Branch)"
                     
                 col_chk, col_exp = st.columns([0.05, 0.95])
                 with col_chk:
@@ -1717,11 +1736,10 @@ with col2:
                         if c2.button("↓", key=f"move_down_{l.id}", disabled=visible_index == len(display_lines) - 1, help="Move this prompt line later"):
                             if move_line(l.id, visible_line_ids, "down"):
                                 st.rerun()
-                        if c3.button("Duplicate", key=f"dup_{l.id}"):
-                            if is_free() and not st.session_state.get("focused_line_id"):
-                                st.error("「Free版では編集にFocus Edit Modeが必要です。Focus Edit を押して Focus Edit Modeに入ってから編集してください。」")
-                                st.stop()
-                            duplicate_line(l.id)
+                        if c3.button("Branch", key=f"dup_{l.id}", help="Create a branch immediately after this prompt line"):
+                            new_line_id = duplicate_line(l.id)
+                            if new_line_id:
+                                st.session_state.branch_feedback = "Created a branch directly after the source line."
                             st.rerun()
                         if c4.button("Delete", key=f"del_{l.id}"):
                             if is_free() and not st.session_state.get("focused_line_id"):
