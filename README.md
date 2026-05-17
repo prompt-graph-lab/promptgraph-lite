@@ -26,7 +26,7 @@ PromptGraph Lite is the entry point for the core PromptGraph concept:
 2. **Prompt Lineage**: Review each prompt as a reusable line in a larger collection or story sequence.
 3. **Focus Edit / Branch Story**: Safely edit one prompt line at a time, branch from existing lines, and continue the story into the next line.
 4. **Export / Generate Result**: Generate one focused-line candidate at a time, choose After/Reference images, or export active prompts to combined TXT. Batch generation is Pro-only.
-5. **Project Management**: Save and reload JSON projects without changing the project file format.
+5. **Project Management**: Save, reopen, and review JSON lineage workspaces without changing the project file format.
 6. **Graph / Prompt Cloud Preview**: Inspect repeated words, relationships, and future Pro visualization potential.
 
 Lite is intentionally not a random prompt generator. It is for maintaining, modifying, and reusing existing AI illustration assets and prompt/image collections.
@@ -164,6 +164,8 @@ This enables future support for:
 - Merge identical words
 - Rename/Delete preview
 - JSON save/load
+- Project Overview with lineage, branch, continuation, candidate, and After-image counts
+- Recent project tracking for saved JSON workspaces
 - TXT export
 - Streamlit-based UI
 - Prompt structure inspection
