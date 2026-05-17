@@ -350,27 +350,149 @@ def duplicate_line(line_id: str, focus_new_branch: bool = False) -> str | None:
     return new_line_id
 
 def get_candidate_image_paths(line) -> list[str]:
-    candidates = getattr(line, "candidate_image_paths", [])
+    return [_candidate_path(candidate) for candidate in _get_line_generated_candidates(line)]
+
+REGULAR_COMFY_WORKFLOW_ERROR = (
+    "This appears to be a regular ComfyUI workflow JSON. Please use API-format workflow_api.json "
+    "exported with Enable Dev Mode Options → Save (API Format)."
+)
+
+def _load_json_from_text(value: str):
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return None
+
+def _is_executable_comfy_workflow(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    nodes = value.get("nodes", value)
+    if not isinstance(nodes, dict):
+        return False
+    return any(
+        isinstance(node, dict) and isinstance(node.get("inputs"), dict)
+        for node in nodes.values()
+    )
+
+def _is_regular_comfy_ui_workflow(value) -> bool:
+    if not isinstance(value, dict):
+        return False
+    return isinstance(value.get("nodes"), list) and (
+        "last_node_id" in value or "last_link_id" in value or "links" in value
+    )
+
+def _validate_api_comfy_workflow(workflow_json):
+    if _is_regular_comfy_ui_workflow(workflow_json):
+        raise ValueError(REGULAR_COMFY_WORKFLOW_ERROR)
+    if not _is_executable_comfy_workflow(workflow_json):
+        raise ValueError("Workflow JSON is not a ComfyUI API-format workflow with node inputs.")
+
+def _replace_clip_text_prompts(workflow_json, line):
+    if not isinstance(workflow_json, dict):
+        return 0
+
+    nodes = workflow_json.get("nodes", workflow_json)
+    if not isinstance(nodes, dict):
+        return 0
+
+    replacements = 0
+    clip_inputs = []
+    for node in nodes.values():
+        if not isinstance(node, dict):
+            continue
+        if "CLIPTextEncode" not in str(node.get("class_type", "")):
+            continue
+        inputs = node.get("inputs", {})
+        if isinstance(inputs, dict) and isinstance(inputs.get("text"), str):
+            clip_inputs.append(inputs)
+
+    for inputs in clip_inputs:
+        if inputs.get("text"):
+            inputs["text"] = getattr(line, "current_text", "") or ""
+            replacements += 1
+
+    return replacements
+
+def _candidate_path(candidate):
+    if isinstance(candidate, dict):
+        return str(candidate.get("path") or "")
+    return str(candidate) if candidate else ""
+
+def _normalize_candidate_record(candidate):
+    if isinstance(candidate, dict):
+        path = _candidate_path(candidate)
+        if not path:
+            return None
+        record = dict(candidate)
+        record["path"] = path
+        return record
+
+    path = _candidate_path(candidate)
+    if not path:
+        return None
+    return {"path": path}
+
+def _normalize_candidate_records(candidates):
+    normalized = []
+    seen = set()
+    for candidate in candidates or []:
+        record = _normalize_candidate_record(candidate)
+        if not record:
+            continue
+        path = record["path"]
+        if path not in seen:
+            normalized.append(record)
+            seen.add(path)
+    return normalized
+
+def _make_generated_candidate_record(path, line, source):
+    if not path:
+        return None
+    return {
+        "path": str(path),
+        "prompt_text": getattr(line, "current_text", "") or "",
+        "source": source,
+        "origin_line_id": getattr(line, "id", "") or "",
+        "origin_line_index": getattr(line, "current_index", None),
+    }
+
+def _get_line_generated_candidates(line):
+    candidates = getattr(line, "generated_candidates", None)
+    legacy_paths = getattr(line, "candidate_image_paths", None)
     if not isinstance(candidates, list):
         candidates = []
+    if isinstance(legacy_paths, list):
+        candidates = [*candidates, *legacy_paths]
+    line.generated_candidates = _normalize_candidate_records(candidates)
+    line.candidate_image_paths = [_candidate_path(candidate) for candidate in line.generated_candidates]
+    return line.generated_candidates
 
-    existing = []
-    for path in candidates:
-        if path and path not in existing:
-            existing.append(path)
-
-    line.candidate_image_paths = existing
-    return line.candidate_image_paths
+def _append_line_generated_candidates(line, candidates_to_add):
+    if isinstance(candidates_to_add, (str, dict)):
+        candidates_to_add = [candidates_to_add]
+    candidates = _get_line_generated_candidates(line)
+    seen = {_candidate_path(candidate) for candidate in candidates}
+    for candidate in candidates_to_add or []:
+        record = _normalize_candidate_record(candidate)
+        if not record:
+            continue
+        path = record["path"]
+        if path not in seen:
+            candidates.append(record)
+            seen.add(path)
+    line.generated_candidates = candidates
+    line.candidate_image_paths = [_candidate_path(candidate) for candidate in candidates]
 
 def add_candidate_image(line, image_path: str):
-    candidates = get_candidate_image_paths(line)
-    if image_path and image_path not in candidates:
-        candidates.append(image_path)
+    _append_line_generated_candidates(line, _make_generated_candidate_record(image_path, line, "single_generate"))
 
 def set_candidate_as_after(line, image_path: str):
     push_history()
     add_candidate_image(line, image_path)
     line.generated_image_path = image_path
+    line.selected_candidate_path = image_path
 
 def set_candidate_as_reference(line, image_path: str):
     push_history()
@@ -386,18 +508,42 @@ def build_lite_generation_workflow(target_line):
 
     mapping = st.session_state.settings.get("comfy_mapping")
     fallback_prompt = st.session_state.settings.get("fallback_prompt", "(masterpiece:1.0)")
+    active_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
+    injection_line = copy.deepcopy(target_line)
+    injection_line.current_text = ", ".join(active_tokens)
+
     if mapping and "group_map" in mapping:
         workflow_json = json.loads(wf_str)
+        _validate_api_comfy_workflow(workflow_json)
         from core.comfyui import build_prompt_by_group, inject_prompt_to_workflow
         grouped = build_prompt_by_group(st.session_state.project, target_line, st.session_state.disabled_modules)
         return inject_prompt_to_workflow(workflow_json, grouped, mapping, fallback_prompt=fallback_prompt)
 
     if "__PROMPT__" not in wf_str:
-        st.warning("The workflow JSON does not contain '__PROMPT__'. The prompt will not be injected.")
+        workflow_json = json.loads(wf_str)
+        _validate_api_comfy_workflow(workflow_json)
+        if _replace_clip_text_prompts(workflow_json, injection_line) == 0:
+            st.warning("The workflow JSON does not contain '__PROMPT__'. The prompt may not be injected.")
+        return workflow_json
 
-    active_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
     escaped_prompt = json.dumps(", ".join(active_tokens))[1:-1]
-    return json.loads(wf_str.replace("__PROMPT__", escaped_prompt))
+    workflow_json = json.loads(wf_str.replace("__PROMPT__", escaped_prompt))
+    _validate_api_comfy_workflow(workflow_json)
+    return workflow_json
+
+def render_lite_comfy_workflow_debug_preview(target_line):
+    with st.expander("Debug: ComfyUI Workflow Preview", expanded=False):
+        st.caption("Shared workflow JSON path")
+        st.code(st.session_state.comfy_workflow_path or "(not set)", language="text")
+        if not os.path.exists(st.session_state.comfy_workflow_path):
+            st.warning(f"Workflow JSON not found at {st.session_state.comfy_workflow_path}")
+            return
+        try:
+            workflow_json = build_lite_generation_workflow(target_line)
+            st.caption("Final injected API-format workflow JSON")
+            st.code(json.dumps(workflow_json, indent=2, ensure_ascii=False), language="json")
+        except Exception as exc:
+            st.warning(f"Could not build workflow preview: {exc}")
 
 def move_line(line_id: str, visible_line_ids: list[str], direction: str) -> bool:
     if line_id not in visible_line_ids:
@@ -1689,9 +1835,10 @@ with col2:
                     else:
                         st.info("No after image selected yet.")
 
-            st.markdown("### 🎨 Lite Generation Candidates")
-            st.caption("Generate one image from this focused line, keep it as a Candidate, then assign it as After or Reference.")
-            if st.button("Generate Single Candidate with ComfyUI", type="primary"):
+            st.markdown("#### Generate / Compare")
+            render_lite_comfy_workflow_debug_preview(target_line)
+            st.caption("Lite runs one focused-line generation at a time. Batch generation and scene pools stay Pro-only.")
+            if st.button("🎨 Generate with ComfyUI", type="primary"):
                 try:
                     workflow_json = build_lite_generation_workflow(target_line)
                     output_dir = os.path.join(st.session_state.project.source_directory or ".", "generated")
@@ -1715,21 +1862,35 @@ with col2:
 
                     if gen_path:
                         push_history()
-                        add_candidate_image(target_line, gen_path)
+                        _append_line_generated_candidates(
+                            target_line,
+                            _make_generated_candidate_record(gen_path, target_line, "single_generate"),
+                        )
+                        target_line.generated_image_path = gen_path
+                        target_line.selected_candidate_path = gen_path
                         st.success("Generated one candidate image for this prompt line.")
                         st.rerun()
                 except Exception as e:
                     st.error(f"Lite single-image generation failed: {e}")
 
-            candidate_paths = get_candidate_image_paths(target_line)
-            existing_candidates = [path for path in candidate_paths if path and os.path.exists(path)]
-            missing_candidates = [path for path in candidate_paths if path and not os.path.exists(path)]
+            candidates = list(_get_line_generated_candidates(target_line))
+            existing_candidates = [
+                candidate
+                for candidate in candidates
+                if _candidate_path(candidate) and os.path.exists(_candidate_path(candidate))
+            ]
+            missing_candidates = [
+                candidate
+                for candidate in candidates
+                if _candidate_path(candidate) and not os.path.exists(_candidate_path(candidate))
+            ]
             if missing_candidates:
                 st.caption(f"{len(missing_candidates)} saved candidate path(s) are missing on disk.")
 
             if existing_candidates:
                 with st.expander("Candidate Images", expanded=True):
-                    for candidate_index, candidate_path in enumerate(reversed(existing_candidates)):
+                    for candidate_index, candidate in enumerate(reversed(existing_candidates)):
+                        candidate_path = _candidate_path(candidate)
                         st.image(candidate_path, width="stretch")
                         st.caption(candidate_path)
                         ca, cr = st.columns(2)

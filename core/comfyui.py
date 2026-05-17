@@ -133,11 +133,16 @@ def generate_image_with_progress(workflow_json: dict, server_address: str, outpu
     進捗中は {"type": "...", "text": "...", "value": float} の辞書をyieldする。
     完了時に保存された画像のパスを返す（ジェネレータの戻り値、または最終yieldの特別な形式で）。
     """
+    if not isinstance(workflow_json, dict):
+        raise Exception("Workflow JSON must be a ComfyUI API-format object.")
+
     server_address = server_address.replace("http://", "").replace("https://", "").strip("/")
     client_id = str(uuid.uuid4())
     
     # シード値をランダム化してComfyUIのキャッシュを回避する
     for node_id, node_data in workflow_json.items():
+        if not isinstance(node_data, dict):
+            continue
         if "inputs" in node_data:
             inputs = node_data["inputs"]
             for seed_key in ["seed", "noise_seed"]:

@@ -11,6 +11,38 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _candidate_path(candidate):
+    if isinstance(candidate, dict):
+        return str(candidate.get("path") or "")
+    return str(candidate) if candidate else ""
+
+def _normalize_candidate_record(candidate):
+    if isinstance(candidate, dict):
+        path = _candidate_path(candidate)
+        if not path:
+            return None
+        record = dict(candidate)
+        record["path"] = path
+        return record
+
+    path = _candidate_path(candidate)
+    if not path:
+        return None
+    return {"path": path}
+
+def _normalize_generated_candidates(candidates) -> List[dict]:
+    normalized = []
+    seen = set()
+    for candidate in candidates or []:
+        record = _normalize_candidate_record(candidate)
+        if not record:
+            continue
+        path = record["path"]
+        if path not in seen:
+            normalized.append(record)
+            seen.add(path)
+    return normalized
+
 def load_directory(dir_path: str, max_depth: int = None) -> Project:
     project = Project(source_directory=dir_path)
     txt_files = sorted(glob.glob(os.path.join(dir_path, "*.txt")))
@@ -64,6 +96,7 @@ def load_directory(dir_path: str, max_depth: int = None) -> Project:
                     generated_image_path=gen_img_path
                 )
                 prompt_line.candidate_image_paths = candidate_image_paths
+                prompt_line.generated_candidates = _normalize_generated_candidates(candidate_image_paths)
                 project.prompt_lines.append(prompt_line)
                 line_index += 1
         except Exception as e:
@@ -101,9 +134,15 @@ class SetEncoder(json.JSONEncoder):
 def save_project_to_json(project: Project, output_path: str):
     data = asdict(project)
     for line_data, line in zip(data.get("prompt_lines", []), project.prompt_lines):
-        candidates = getattr(line, "candidate_image_paths", [])
+        candidates = _normalize_generated_candidates(
+            getattr(line, "generated_candidates", None) or getattr(line, "candidate_image_paths", [])
+        )
         if candidates:
-            line_data["candidate_image_paths"] = list(candidates)
+            line_data["generated_candidates"] = candidates
+            line_data["candidate_image_paths"] = [candidate["path"] for candidate in candidates]
+        selected_candidate_path = getattr(line, "selected_candidate_path", None)
+        if selected_candidate_path:
+            line_data["selected_candidate_path"] = selected_candidate_path
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, cls=SetEncoder, indent=2, ensure_ascii=False)
 
@@ -118,7 +157,12 @@ def load_project_from_json(json_path: str) -> Project:
     for l_data in data.get("prompt_lines", []):
         filtered_data = {k: v for k, v in l_data.items() if k in valid_pl_keys}
         pl = PromptLine(**filtered_data)
-        pl.candidate_image_paths = list(l_data.get("candidate_image_paths", []))
+        candidates = _normalize_generated_candidates(
+            l_data.get("generated_candidates") or l_data.get("candidate_image_paths", [])
+        )
+        pl.generated_candidates = candidates
+        pl.candidate_image_paths = [candidate["path"] for candidate in candidates]
+        pl.selected_candidate_path = l_data.get("selected_candidate_path") or getattr(pl, "generated_image_path", None)
         project.prompt_lines.append(pl)
         
     valid_pn_keys = {f.name for f in dataclasses.fields(PromptNode)}
