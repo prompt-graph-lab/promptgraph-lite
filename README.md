@@ -1,8 +1,8 @@
 # PromptGraph Lite
 
-Graph-based Prompt IDE for Stable Diffusion workflows.
+Lineage-oriented prompt and asset editor for Stable Diffusion workflows.
 
-PromptGraph Lite visualizes prompt structure, relationships, and editing flow as an interactive graph.
+PromptGraph Lite helps users import existing AI illustration assets or prompt collections, edit prompt lines as lineage/story units, and export or save the result for long-term reuse.
 
 Instead of treating prompts as a single long text string,
 PromptGraph approaches prompts as structured editable data.
@@ -15,6 +15,21 @@ The goal is to make prompts:
 
 PromptGraph is designed not only for humans,
 but also for future AI-assisted workflows and agent-driven prompt systems.
+
+---
+
+# Lite v1.0 Workflow
+
+PromptGraph Lite is the entry point for the core PromptGraph concept:
+
+1. **Import Existing Assets**: Load existing `.txt` prompt files and same-name PNG/JPG images from a directory.
+2. **Prompt Lineage**: Review each prompt as a reusable line in a larger collection or story sequence.
+3. **Focus Edit / Branch Story**: Safely edit one prompt line at a time and duplicate lines to create branches.
+4. **Export / Generate Result**: Export active prompts to combined TXT for external generation. Direct ComfyUI execution is Pro-only.
+5. **Project Management**: Save and reload JSON projects without changing the project file format.
+6. **Graph / Prompt Cloud Preview**: Inspect repeated words, relationships, and future Pro visualization potential.
+
+Lite is intentionally not a random prompt generator. It is for maintaining, modifying, and reusing existing AI illustration assets and prompt/image collections.
 
 ---
 
@@ -137,8 +152,10 @@ This enables future support for:
 ## Available in PromptGraph Lite
 
 - Graph visualization of prompts
+- Prompt Cloud / word frequency visualization
 - Focus Edit Mode
 - Prompt line editing
+- Single-line duplication for branching
 - Undo/history system
 - Merge identical words
 - Rename/Delete preview
@@ -158,6 +175,10 @@ PromptGraph Pro expands the workflow with advanced structured editing and automa
 Current and planned Pro features include:
 - Negative Prompt support
 - Token-aware batch editing
+- Batch line editing
+- Module authoring/editing
+- Scene pool and advanced scene operations
+- Advanced ComfyUI batch generation
 - Advanced workflow operations
 - Scene-oriented transformations
 - Prompt normalization workflows
@@ -180,9 +201,11 @@ Designed for:
 Lite intentionally limits destructive global editing features.
 
 The goal is:
-- understanding
-- visualization
-- safe experimentation
+- import existing assets
+- understand prompt lineage
+- edit one line safely
+- export/regenerate through external workflows
+- save and resume projects
 
 ---
 

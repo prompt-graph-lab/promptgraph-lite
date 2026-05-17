@@ -486,30 +486,19 @@ if st.session_state.show_tutorial:
     st.title("🎉 PromptGraph Liteへようこそ！")
 
     st.markdown("""
-    このツールは、Stable Diffusionのプロンプトを  
-    **グラフ構造で可視化・編集できるエディタ**です。
+    PromptGraph Liteは、既存のAIイラスト資産やプロンプト集を**読み込み、行単位の系譜として編集し、再利用するための入口**です。
 
     ---
 
-    ## 🧭 基本の使い方（3ステップ）
+    ## 🧭 基本の流れ
 
-    ### ① ノードをクリック
-    中央のグラフの単語（ノード）をクリックすると、  
-    関連する部分だけが表示されます。
+    1. **Import Existing Assets**: 既存の `.txt` と同名画像を読み込みます。
+    2. **Prompt Lineage**: Linesでプロンプト行を確認し、編集対象を選びます。
+    3. **Focus Edit / Branch Story**: 1行を安全に編集・複製して派生を作ります。
+    4. **Export / Generate**: 編集結果をTXTに書き出します。直接生成はPro機能です。
+    5. **Project Management**: JSONで長期作業用に保存・再開します。
 
-    👉 気になる単語をクリックしてみてください
-
-    ---
-
-    ### ② Word Cloudで単語を選ぶ
-    グラフの下にあるWord Cloudから単語を選ぶと、  
-    その単語を含むプロンプトを絞り込めます。
-
-    ---
-
-    ### ③ Focus Editで編集する
-    Linesタブで行を選び、「Focus Edit」を押すと、  
-    その1行だけ安全に編集できます。
+    GraphとPrompt Cloudは、プロンプトのつながりやProで広がる編集可能性を確認するプレビューです。
 
     ---
 
@@ -523,13 +512,12 @@ if st.session_state.show_tutorial:
 
     ## ⚠ Free版の制限
 
-    - 一括編集はできません
-    - Module作成はできません
-    - ComfyUI実行はできません
+    - 一括編集、Module作成、直接ComfyUI実行はPro機能です
+    - LiteではFocus Editを中心に、既存資産を安全に理解・編集します
 
     ---
 
-    👉 まずはノードをクリックしてみてください
+    👉 まずはサイドバーの **Import / Load Assets** から始めてください。
 
     「このチュートリアルは、サイドバーの Help → Show Tutorial からいつでも再表示できます。」
     """)
@@ -541,11 +529,15 @@ if st.session_state.show_tutorial:
     st.stop()
 
 st.sidebar.title("PromptGraph Lite")
+st.sidebar.caption("既存資産を読み込み、Prompt LineageをFocus Editで安全に分岐・再利用します。")
 
 inject_keyboard_shortcuts()
 render_shortcut_actions()
 
 # Directory loading
+st.sidebar.markdown("---")
+st.sidebar.subheader("1. Import / Load Assets")
+st.sidebar.caption("既存のプロンプトTXTと、同名のPNG/JPG画像をプロジェクトとして読み込みます。")
 target_dir = st.sidebar.text_input("Source Directory", st.session_state.settings.get("last_source_directory", "./dummy_data"))
 
 if st.sidebar.button("Load Directory"):
@@ -566,7 +558,7 @@ if st.sidebar.button("Load Directory"):
         st.sidebar.error("Invalid directory path")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🛠️ Current Status")
+st.sidebar.subheader("Lite Workflow Status")
 edition_label = "💎 PRO" if st.session_state.edition == "PRO" else "🆓 FREE"
 st.sidebar.write(f"**Edition:** {edition_label}")
 
@@ -578,7 +570,7 @@ if st.session_state.get("focused_line_id"):
     if line:
         st.sidebar.caption(f"Target: {line.original_file_name}")
 elif is_free():
-    st.sidebar.warning("Free版では編集にFocus Edit Modeが必要です。Linesタブから編集したい行を選び、Focus Edit を押してください。")
+    st.sidebar.info("Liteでは編集対象を1行に絞るFocus Editが基本です。Prompt Lineageから行を選びます。")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Help")
@@ -600,7 +592,7 @@ if st.sidebar.button("📘 Show Tutorial"):
     st.session_state.show_tutorial = True
     st.rerun()
 
-st.sidebar.caption("基本操作：ノード選択 → Word Cloud確認 → Focus Editで1行編集")
+st.sidebar.caption("基本操作：Import → Prompt Lineage → Focus Edit → Export / Project Save")
 
 # Depth calculation (kept internally)
 
@@ -613,7 +605,8 @@ if "display_depth" not in st.session_state:
     st.session_state.display_depth = max(0, max_depth)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Search Node")
+st.sidebar.subheader("6. Graph / Prompt Cloud Preview")
+st.sidebar.caption("可視化はLiteの理解補助です。広範囲の構造編集はProの領域です。")
 
 search_query = st.sidebar.text_input("Search Node (Word)")
 if st.sidebar.button("Search") and search_query:
@@ -635,7 +628,7 @@ if st.sidebar.button("Search") and search_query:
 focus_mode = st.sidebar.toggle("Path Filter (Show Selected Paths Only)", key="focus_mode")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Graph Settings")
+st.sidebar.subheader("Graph Preview Settings")
 
 has_selection = bool(st.session_state.selected_node_ids)
 
@@ -704,7 +697,8 @@ if st.sidebar.button("Undo", disabled=len(st.session_state.history)==0):
     st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🧩 Module Toggles")
+st.sidebar.subheader("Module Toggles Preview")
+st.sidebar.caption("読み込まれたModuleタグのON/OFF確認用です。Module作成・編集はPro機能です。")
 if st.session_state.project:
     available_modules = get_available_modules(st.session_state.project)
     if available_modules:
@@ -724,6 +718,7 @@ else:
 
 st.sidebar.markdown("---")
 # Export/Save
+st.sidebar.subheader("4. Export / Generate Result")
 # TODO: Add export modes: combined TXT / overwrite original files / write to separate output directory
 # 「Free版でのExport/Save許可はプレ公開方針。必要なら後で制限する。」
 export_path = st.sidebar.text_input("Export Combined TXT Path", st.session_state.settings.get("last_export_path", "prompts.txt"))
@@ -735,6 +730,10 @@ if st.sidebar.button("Export Combined TXT"):
         save_settings(st.session_state.settings)
         st.sidebar.success(f"Exported to {export_path}")
 
+st.sidebar.caption("Direct ComfyUI generation remains a Pro feature; Lite exports prompts for external use.")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("5. Project Management")
 json_path = st.sidebar.text_input("Save Project (JSON)", "project.json")
 col_s1, col_s2 = st.sidebar.columns(2)
 with col_s1:
@@ -758,11 +757,12 @@ with col_s2:
             st.error("File not found")
 
 if not st.session_state.project:
-    st.info("Please load a directory or a project JSON from the sidebar.")
+    st.info("Start with Import / Load Assets in the sidebar, or load a saved project JSON from Project Management.")
     st.stop()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("ComfyUI Integration")
+st.sidebar.subheader("Generate Settings (Pro Preview)")
+st.sidebar.caption("Lite keeps generation setup visible as future potential, but does not run Pro-only generation.")
 
 def update_comfy_settings():
     st.session_state.settings["comfyui_url"] = st.session_state.comfy_url
@@ -774,10 +774,14 @@ st.session_state.comfy_workflow_path = st.sidebar.text_input("Workflow JSON Path
 
 project = st.session_state.project
 
+st.title("PromptGraph Lite Workflow")
+st.caption("Import existing assets → Edit prompt lineage → Export/regenerate → Manage project → Preview graph and prompt cloud potential.")
+
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("Prompt Graph")
+    st.subheader("Graph Preview")
+    st.caption("Inspect lineage and repeated prompt structure. Use Prompt Lineage for Lite editing decisions.")
     
     if not hasattr(project, "phrase_freq"):
         project = build_graph(project)
@@ -895,7 +899,8 @@ with col1:
             st.rerun()
 
     st.markdown("---")
-    st.markdown("**☁️ Word Cloud**")
+    st.markdown("**☁️ Prompt Cloud Preview**")
+    st.caption("頻出語を選び、どのプロンプト行に現れるかを確認します。編集の起点探しに使います。")
     with st.expander("Advanced Word Cloud Settings", expanded=False):
         mode = st.radio("WordCloud Mode", ["Global", "Graph"], horizontal=True)
         global_group_freq = getattr(project, "global_group_freq", {})
@@ -1003,7 +1008,7 @@ with col1:
     pills_options = sorted_words[:top_n]
 
     selected_from_pills = st.pills(
-        "☁️ Word Cloud (Top 30)",
+        "Prompt Cloud (Top 30)",
         options=pills_options,
         default=[w for w in current_selected_words_visible if w in pills_options],
         format_func=lambda w: f"{w} ({freq[w]})",
@@ -1044,7 +1049,8 @@ with col1:
     
     if st.session_state.selected_node_ids:
         st.markdown("---")
-        st.markdown("**⚡ Quick Actions**")
+        st.markdown("**⚡ Focus Edit Helpers**")
+        st.caption("LiteではFocus Edit中の1行編集が基本です。複数行や構造化された一括操作はPro機能として制限されます。")
 
         # Edit Scope Logic
         scope_labels = {
@@ -1367,10 +1373,13 @@ with col1:
 
 
 with col2:
-    tab1, tab2 = st.tabs(["Lines", "Node Operations"])
-    
+    tab1, tab2 = st.tabs(["Prompt Lineage", "Node Operations"])
+
     with tab1:
-        st.subheader("Prompt Lines")
+        st.subheader("Prompt Lineage")
+        st.caption("読み込んだプロンプトを行単位の系譜として確認します。Focus Editで1行に入り、複製で派生を作ります。")
+        # TODO Lite v1.0: Add single-line reorder controls when a compact, save-compatible UI is defined.
+        st.caption("Line reorder controls are not available yet in Lite; keep order changes as a follow-up item.")
         
         display_lines = [l for l in project.prompt_lines if not l.deleted]
         
@@ -1439,7 +1448,8 @@ with col2:
                 st.session_state.project = merge_duplicates_all_lines(st.session_state.project)
                 restore_focus_after_graph_update(prev_focus)
                 st.rerun()
-                
+        st.caption("Selected-line batch operations are shown as Pro potential and remain restricted in Lite.")
+
         st.write("---")
         
         if "focused_line_id" not in st.session_state:
@@ -1452,14 +1462,15 @@ with col2:
                 st.session_state.focused_line_id = None
                 st.rerun()
                 
-            st.markdown(f"### 🎯 Focus Edit Mode: `{target_line.original_file_name}`")
+            st.markdown(f"### 🎯 Focus Edit / Branch Story: `{target_line.original_file_name}`")
+            st.caption("この行だけを編集し、既存資産から別案やストーリー分岐を作ります。")
             if st.button("🔙 Back to All Lines"):
                 st.session_state.focused_line_id = None
                 st.rerun()
                 
             if st.session_state.edition == "FREE":
                 st.markdown("---")
-                st.markdown("### 📊 Active Prompt Preview (Free Edition)")
+                st.markdown("### 📊 Export / Generate Preview (Lite)")
                 st.info("このプレビューは、現在の行プロンプトに対してModule Toggleなどを反映した、実際にExportされるプロンプトを表示します。通常のノード編集は保存時点でCurrent Line Promptに反映されるため、差分が小さい場合があります。")
                 
                 # Get current generated text
@@ -1547,7 +1558,7 @@ with col2:
                     restore_focus_after_graph_update(prev_focus)
                     st.rerun()
 
-            with st.expander("Image Preview", expanded=False):
+            with st.expander("Imported / Generated Image Preview", expanded=False):
                 img_c1, img_c2 = st.columns(2)
                 with img_c1:
                     st.markdown("**Original Image**")
@@ -1562,7 +1573,8 @@ with col2:
                     else:
                         st.info("No generated image yet.")
                     
-            if st.button("🎨 Generate with ComfyUI", type="primary"):
+            st.caption("Regeneration from Lite is represented by export/manual copy. Direct ComfyUI execution is Pro-only.")
+            if st.button("🎨 Generate with ComfyUI (Pro)", type="primary"):
                 if st.session_state.edition == "FREE":
                     show_upgrade_dialog("Direct ComfyUI execution and progress tracking are available in the Pro edition.")
                     st.stop()
@@ -1629,7 +1641,7 @@ with col2:
                 
                 with col_exp:
                     with st.expander(title):
-                        if st.button("🎯 Focus Edit", key=f"focus_btn_{l.id}"):
+                        if st.button("🎯 Focus Edit / Branch", key=f"focus_btn_{l.id}"):
                             st.session_state.focused_line_id = l.id
                             st.rerun()
                             
