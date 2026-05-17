@@ -156,6 +156,7 @@ This enables future support for:
 - Focus Edit Mode
 - Prompt line editing
 - Single-line duplication for branching
+- Single-line reorder for story/lineage ordering
 - Undo/history system
 - Merge identical words
 - Rename/Delete preview

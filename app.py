@@ -339,6 +339,42 @@ def duplicate_line(line_id: str):
     st.session_state.project = build_graph(st.session_state.project)
     restore_focus_after_graph_update(prev_focus)
 
+def move_line(line_id: str, visible_line_ids: list[str], direction: str) -> bool:
+    if line_id not in visible_line_ids:
+        return False
+
+    visible_index = visible_line_ids.index(line_id)
+    if direction == "up":
+        if visible_index == 0:
+            return False
+        adjacent_line_id = visible_line_ids[visible_index - 1]
+    elif direction == "down":
+        if visible_index == len(visible_line_ids) - 1:
+            return False
+        adjacent_line_id = visible_line_ids[visible_index + 1]
+    else:
+        return False
+
+    line_indices = {line.id: i for i, line in enumerate(st.session_state.project.prompt_lines)}
+    if line_id not in line_indices or adjacent_line_id not in line_indices:
+        return False
+
+    push_history()
+    target_index = line_indices[line_id]
+    adjacent_index = line_indices[adjacent_line_id]
+    prompt_lines = st.session_state.project.prompt_lines
+    prompt_lines[target_index], prompt_lines[adjacent_index] = prompt_lines[adjacent_index], prompt_lines[target_index]
+
+    for i, line in enumerate(prompt_lines):
+        line.current_index = i
+
+    prev_focus = st.session_state.get("focused_line_id")
+    st.session_state.project = build_graph(st.session_state.project)
+    restore_focus_after_graph_update(prev_focus)
+    st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+    sync_text_areas()
+    return True
+
 @st.dialog("Upgrade to Pro Edition")
 def show_upgrade_dialog(message: str):
     st.warning(message)
@@ -1378,8 +1414,7 @@ with col2:
     with tab1:
         st.subheader("Prompt Lineage")
         st.caption("読み込んだプロンプトを行単位の系譜として確認します。Focus Editで1行に入り、複製で派生を作ります。")
-        # TODO Lite v1.0: Add single-line reorder controls when a compact, save-compatible UI is defined.
-        st.caption("Line reorder controls are not available yet in Lite; keep order changes as a follow-up item.")
+        st.caption("Use ↑ / ↓ on each line to adjust story order. Reorder is single-line and Lite-safe.")
         
         display_lines = [l for l in project.prompt_lines if not l.deleted]
         
@@ -1464,9 +1499,21 @@ with col2:
                 
             st.markdown(f"### 🎯 Focus Edit / Branch Story: `{target_line.original_file_name}`")
             st.caption("この行だけを編集し、既存資産から別案やストーリー分岐を作ります。")
-            if st.button("🔙 Back to All Lines"):
-                st.session_state.focused_line_id = None
-                st.rerun()
+            focus_visible_line_ids = [line.id for line in project.prompt_lines if not line.deleted]
+            focus_visible_index = focus_visible_line_ids.index(target_line.id)
+            c_back, c_up, c_down = st.columns([2, 1, 1])
+            with c_back:
+                if st.button("🔙 Back to All Lines"):
+                    st.session_state.focused_line_id = None
+                    st.rerun()
+            with c_up:
+                if st.button("↑", key=f"focus_move_up_{target_line.id}", disabled=focus_visible_index == 0, help="Move this focused line earlier"):
+                    if move_line(target_line.id, focus_visible_line_ids, "up"):
+                        st.rerun()
+            with c_down:
+                if st.button("↓", key=f"focus_move_down_{target_line.id}", disabled=focus_visible_index == len(focus_visible_line_ids) - 1, help="Move this focused line later"):
+                    if move_line(target_line.id, focus_visible_line_ids, "down"):
+                        st.rerun()
                 
             if st.session_state.edition == "FREE":
                 st.markdown("---")
@@ -1628,7 +1675,8 @@ with col2:
                         st.error(f"Generation failed: {e}")
                 
         else:
-            for l in display_lines:
+            visible_line_ids = [line.id for line in display_lines]
+            for visible_index, l in enumerate(display_lines):
                 title = f"[{l.original_file_name}] Line {l.original_index}"
                 if l.edited:
                     title += " (Edited)"
@@ -1662,14 +1710,20 @@ with col2:
                                 update_line_text(l.id, new_text)
                                 st.rerun()
                                 
-                        c1, c2 = st.columns(2)
-                        if c1.button("Duplicate", key=f"dup_{l.id}"):
+                        c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+                        if c1.button("↑", key=f"move_up_{l.id}", disabled=visible_index == 0, help="Move this prompt line earlier"):
+                            if move_line(l.id, visible_line_ids, "up"):
+                                st.rerun()
+                        if c2.button("↓", key=f"move_down_{l.id}", disabled=visible_index == len(display_lines) - 1, help="Move this prompt line later"):
+                            if move_line(l.id, visible_line_ids, "down"):
+                                st.rerun()
+                        if c3.button("Duplicate", key=f"dup_{l.id}"):
                             if is_free() and not st.session_state.get("focused_line_id"):
                                 st.error("「Free版では編集にFocus Edit Modeが必要です。Focus Edit を押して Focus Edit Modeに入ってから編集してください。」")
                                 st.stop()
                             duplicate_line(l.id)
                             st.rerun()
-                        if c2.button("Delete", key=f"del_{l.id}"):
+                        if c4.button("Delete", key=f"del_{l.id}"):
                             if is_free() and not st.session_state.get("focused_line_id"):
                                 st.error("「Free版では編集にFocus Edit Modeが必要です。Focus Edit を押して Focus Edit Modeに入ってから編集してください。」")
                                 st.stop()
