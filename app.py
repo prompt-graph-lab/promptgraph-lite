@@ -309,7 +309,7 @@ def render_shortcut_actions():
                     new_structure = extract_module_structure_from_text(new_text)
                     if old_structure != new_structure:
                         st.session_state.shortcut_feedback = "保存できません"
-                        st.error("Free版ではModuleタグを変更できません。")
+                        st.error("Lite版ではModuleタグを変更できません。")
                         st.stop()
                 update_line_text(line.id, new_text)
                 st.session_state.shortcut_feedback = "フォーカス中の生成ソースを保存しました"
@@ -706,14 +706,13 @@ def show_upgrade_dialog(message: str):
     st.markdown("""
     ### 🚀 PromptGraph Proでできること
 
-    Pro版は、大きなイラスト集や長期プロジェクトを高速に扱うための上位版です。
+    Pro版は、グラフ構造を使ってイラスト集をより高度かつ効率的に編集・再利用するための上位版です。
 
     **Pro版機能:**
-    - **一括編集**: イラスト集全体にまたがる操作をまとめて実行できます。
+    - **グラフ構造編集**: イラスト集全体の生成ソースを構造として確認・編集できます。
+    - **効率的な再利用**: 既存の構成や表現を整理し、別ルートや派生に活用できます。
     - **Module作成**: 再利用できるプロンプトModuleを作成・保存できます。
     - **ワークフロー同期**: ComfyUI生成をIDEから直接実行できます。
-    - **自動生成ループ**: 編集に合わせた再生成フローを扱えます。
-    - **高度な分析**: 生成ソース構造をより深く確認できます。
 
     [FANBOXで支援・Pro版を確認](https://example.com/fanbox)
     """)
@@ -756,7 +755,7 @@ def require_pro(message: str) -> bool:
         return False
     return True
 
-def get_free_target_lines_or_block(message: str = "Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。"):
+def get_free_target_lines_or_block(message: str = "Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。"):
     if is_free():
         focused = st.session_state.get("focused_line_id")
         if not focused:
@@ -905,18 +904,6 @@ else:
     st.sidebar.info("プロジェクトはまだ開かれていません。新規作成または保存済みプロジェクトを開いてください。")
 
 overview = project_stats(st.session_state.project)
-with st.sidebar.expander("プロジェクト概要", expanded=bool(st.session_state.project)):
-    st.caption("有効なイラスト、別ルート、続き、候補イラスト、採用イラストを確認します。")
-    st.caption(f"読み込み元: {overview['source_directory'] or '(未設定)'}")
-    st.caption(f"プロジェクトJSON: {current_project_path or '(未保存)'}")
-    metric_cols = st.columns(2)
-    metric_cols[0].metric("有効なイラスト", overview["active_lines"])
-    metric_cols[1].metric("別ルート", overview["branch_lines"])
-    metric_cols = st.columns(2)
-    metric_cols[0].metric("続き", overview["continued_lines"])
-    metric_cols[1].metric("候補イラスト", overview["candidate_images"])
-    st.metric("採用イラスト", overview["after_images"])
-
 last_project_path = get_last_project_path(st.session_state.settings)
 recent_projects = get_recent_projects(st.session_state.settings)
 project_file_default = current_project_path or last_project_path or "project.json"
@@ -962,10 +949,46 @@ with st.sidebar.expander("プロジェクトを開く", expanded=False):
             st.success("プロジェクトを開きました。")
             st.rerun()
 
+if st.button("プロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project"):
+    save_project_to_json(st.session_state.project, json_path_default)
+    st.session_state.current_project_path = os.path.abspath(json_path_default)
+    st.session_state.settings = remember_project(
+        st.session_state.settings,
+        st.session_state.current_project_path,
+    )
+    save_settings(st.session_state.settings)
+    st.success("プロジェクトを保存しました。")
+
+with st.sidebar.expander("名前を付けて保存", expanded=False):
+    st.caption("候補イラストや続きの情報を含めて、プロジェクトをJSONとして保存します。")
+    json_path = st.text_input("プロジェクトJSON", json_path_default, key="save_project_json_path")
+    if st.button("現在のプロジェクトを保存"):
+        if st.session_state.project:
+            save_project_to_json(st.session_state.project, json_path)
+            st.session_state.current_project_path = os.path.abspath(json_path)
+            st.session_state.settings = remember_project(
+                st.session_state.settings,
+                st.session_state.current_project_path,
+            )
+            save_settings(st.session_state.settings)
+            st.success("プロジェクトを保存しました。")
+
+with st.sidebar.expander("プロジェクト概要", expanded=bool(st.session_state.project)):
+    st.caption("有効なイラスト、別ルート、続き、候補イラスト、採用イラストを確認します。")
+    st.caption(f"読み込み元: {overview['source_directory'] or '(未設定)'}")
+    st.caption(f"プロジェクトJSON: {current_project_path or '(未保存)'}")
+    metric_cols = st.columns(2)
+    metric_cols[0].metric("有効なイラスト", overview["active_lines"])
+    metric_cols[1].metric("別ルート", overview["branch_lines"])
+    metric_cols = st.columns(2)
+    metric_cols[0].metric("続き", overview["continued_lines"])
+    metric_cols[1].metric("候補イラスト", overview["candidate_images"])
+    st.metric("採用イラスト", overview["after_images"])
+
 # Directory loading
 st.sidebar.markdown("---")
 st.sidebar.subheader("既存イラスト集を読み込む")
-st.sidebar.warning("プロンプト、画像、またはPNGメタデータをイラストラインに読み込みます。")
+st.sidebar.info("手元のイラスト集がある場合は、プロンプトと画像をフォルダから読み込めます。")
 target_dir = st.sidebar.text_input("読み込みフォルダ", st.session_state.settings.get("last_source_directory", "./dummy_data"))
 
 if st.sidebar.button("フォルダから読み込む", key="import_directory"):
@@ -995,6 +1018,26 @@ st.sidebar.button(
 )
 
 st.sidebar.markdown("---")
+st.sidebar.subheader("出力")
+st.sidebar.warning("プロジェクト保存とは別に、イラストの生成ソース（プロンプト）をTXTとして出力します。")
+export_path = st.sidebar.text_input("出力先TXT", st.session_state.settings.get("last_export_path", "prompts.txt"))
+if st.sidebar.button("イラストの生成ソース（プロンプト）を出力"):
+    if st.session_state.project:
+        export_to_txt(st.session_state.project, export_path, disabled_modules=st.session_state.disabled_modules)
+        st.session_state.settings["last_export_path"] = export_path
+        save_settings(st.session_state.settings)
+        st.sidebar.success(f"出力しました: {export_path}")
+    else:
+        st.sidebar.info("出力するには、先にプロジェクトを作成または読み込んでください。")
+
+st.sidebar.button(
+    "プロンプト・画像セット出力（Preview）",
+    disabled=True,
+    help="Liteでは未対応です。現在は生成ソース（プロンプト）のTXT出力を利用してください。",
+    key="export_prompt_image_set_preview",
+)
+
+st.sidebar.markdown("---")
 st.sidebar.subheader("イラストを編集・分岐・継続する")
 st.sidebar.info("イラストを選んでフォーカス編集に入り、別ルートや続きのイラストを作成します。")
 st.sidebar.markdown("- フォーカス編集\n- 別ルートのイラストを作る\n- このルートの次のイラストを作る\n- 候補イラストを生成する")
@@ -1010,28 +1053,6 @@ if st.session_state.get("focused_line_id") and st.session_state.project:
         st.sidebar.caption(f"対象: {line.original_file_name}")
 elif is_free():
     st.sidebar.info("イラストラインで対象を選び、フォーカス編集に入ってから分岐・継続してください。")
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("ヘルプ")
-with st.sidebar.expander("キーボードショートカット", expanded=False):
-    st.markdown("- `Esc`: グラフ選択を解除")
-    st.markdown("- `Ctrl/Cmd+Z`: 入力中でないときに取り消し")
-    st.markdown("- `Ctrl/Cmd+S`: フォーカス中の生成ソースを保存")
-    st.markdown("- `Enter` / `F2`: フォーカス中の編集欄へ移動")
-    st.markdown("- `Ctrl/Cmd+C`: フォーカス中の生成ソースをコピー")
-    if is_free():
-        st.caption("Liteではフォーカス編集中の1イラスト編集を中心にショートカットを使います。全体編集は制限されています。")
-    else:
-        st.caption("安全なv1ショートカットのみ有効です。破壊的な全体ショートカットは有効化していません。")
-
-if st.session_state.get("shortcut_feedback"):
-    st.sidebar.caption(f"ショートカット: {st.session_state.shortcut_feedback}")
-
-if st.sidebar.button("使い方を表示"):
-    st.session_state.show_tutorial = True
-    st.rerun()
-
-st.sidebar.caption("流れ: プロジェクト -> 読み込み -> フォーカス編集 -> 分岐・継続 -> 保存")
 
 # Depth calculation (kept internally)
 
@@ -1091,9 +1112,9 @@ if is_free():
     merge_preview = st.sidebar.checkbox(
         "同一単語をまとめて表示（Preview）",
         value=current_merge,
-        help="Free版では表示プレビューのみです。同一単語を深さに関係なくまとめたグラフ表示を確認できます。Pro版ではこの統合ビューを使った高速な一括編集が可能です。"
+        help="Lite版では表示プレビューのみです。同一単語を深さに関係なくまとめたグラフ表示を確認できます。Pro版ではこの統合ビューを使った高速な一括編集が可能です。"
     )
-    st.sidebar.caption("Free版では表示プレビューのみです。Pro版ではこの統合ビューを使った高速な一括編集が可能です。")
+    st.sidebar.caption("Lite版では表示プレビューのみです。Pro版ではこの統合ビューを使った高速な一括編集が可能です。")
     if st.session_state.project and getattr(st.session_state.project, "merge_by_word_only", False) != merge_preview:
         st.session_state.project.merge_by_word_only = merge_preview
         prev_focus = st.session_state.get("focused_line_id")
@@ -1156,49 +1177,11 @@ else:
     st.sidebar.info("先にプロジェクトを開くか、フォルダを読み込んでください。")
 
 st.sidebar.markdown("---")
-# Export/Save
-st.sidebar.subheader("保存・出力")
-st.sidebar.warning("イラスト集ワークスペースを保存し、必要に応じて生成ソースを出力します。")
-# TODO: Add export modes: combined TXT / overwrite original files / write to separate output directory
-# 「Free版でのExport/Save許可はプレ公開方針。必要なら後で制限する。」
-save_cols = st.sidebar.columns(2)
-with save_cols[0]:
-    if st.button("プロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project"):
-        save_project_to_json(st.session_state.project, json_path_default)
-        st.session_state.current_project_path = os.path.abspath(json_path_default)
-        st.session_state.settings = remember_project(
-            st.session_state.settings,
-            st.session_state.current_project_path,
-        )
-        save_settings(st.session_state.settings)
-        st.success("プロジェクトを保存しました。")
-with save_cols[1]:
-    st.button("プロンプト・画像セット出力", disabled=True, help="Liteでは未対応です。TXT出力は利用できます。")
-
-with st.sidebar.expander("名前を付けて保存", expanded=False):
-    st.caption("候補イラストや続きの情報を含めて、プロジェクトをJSONとして保存します。")
-    json_path = st.text_input("プロジェクトJSON", json_path_default, key="save_project_json_path")
-    if st.button("現在のプロジェクトを保存"):
-        if st.session_state.project:
-            save_project_to_json(st.session_state.project, json_path)
-            st.session_state.current_project_path = os.path.abspath(json_path)
-            st.session_state.settings = remember_project(
-                st.session_state.settings,
-                st.session_state.current_project_path,
-            )
-            save_settings(st.session_state.settings)
-            st.success("プロジェクトを保存しました。")
-
-export_path = st.sidebar.text_input("出力先TXT", st.session_state.settings.get("last_export_path", "prompts.txt"))
-st.sidebar.caption("現在のイラストの生成ソース（プロンプト）を1つのTXTに出力します。個別ファイル出力は今後対応予定です。")
-if st.sidebar.button("イラストのソース（プロンプト）を出力"):
-    if st.session_state.project:
-        export_to_txt(st.session_state.project, export_path, disabled_modules=st.session_state.disabled_modules)
-        st.session_state.settings["last_export_path"] = export_path
-        save_settings(st.session_state.settings)
-        st.sidebar.success(f"出力しました: {export_path}")
-
-st.sidebar.caption("Liteではフォーカス編集中の単体生成に対応しています。一括生成はPro版機能です。")
+st.sidebar.subheader("ヘルプ")
+if st.sidebar.button("使い方を表示"):
+    st.session_state.show_tutorial = True
+    st.rerun()
+st.sidebar.caption("ショートカット案内は現在非表示です。基本操作は画面上のボタンから行ってください。")
 
 if not st.session_state.project:
     st.title("イラスト集ワークスペースを作成")
@@ -1224,7 +1207,7 @@ if not st.session_state.project.prompt_lines:
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("生成設定")
-st.sidebar.caption("Liteの単体候補生成で使用します。一括生成と自動ループはPro版機能です。")
+st.sidebar.caption("通常は同梱または標準のworkflow_api.jsonを使えます。自分のComfyUIワークフローを使う場合は取扱説明を参照してください。")
 
 def update_comfy_settings():
     st.session_state.settings["comfyui_url"] = st.session_state.comfy_url
@@ -1232,7 +1215,7 @@ def update_comfy_settings():
     save_settings(st.session_state.settings)
 
 st.session_state.comfy_url = st.sidebar.text_input("ComfyUI URL", st.session_state.settings.get("comfyui_url", "127.0.0.1:8188"), on_change=update_comfy_settings)
-st.session_state.comfy_workflow_path = st.sidebar.text_input("workflow JSONパス", st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json"), on_change=update_comfy_settings)
+st.session_state.comfy_workflow_path = st.sidebar.text_input("workflow_api.jsonパス", st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json"), on_change=update_comfy_settings)
 
 project = st.session_state.project
 
@@ -1536,7 +1519,7 @@ with col1:
                 st.info("⚠️ 一致する単語をもとに、**フォーカス中のイラスト**だけへ反映します。")
             else:
                 if st.session_state.edition == "FREE":
-                    st.warning("⚠️ Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                    st.warning("⚠️ Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     use_global_word_ops = False
                 else:
                     use_global_word_ops = True
@@ -1579,7 +1562,7 @@ with col1:
                                 show_upgrade_dialog("複数行にわたる一括リネームはPro版の機能です。")
                                 st.stop()
                             if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                                st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                                st.error("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                                 st.stop()
                             
                             push_history()
@@ -1603,10 +1586,10 @@ with col1:
                     st.stop()
 
                 if target_scope_key != "focused" and st.session_state.edition == "FREE":
-                    show_upgrade_dialog("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                    show_upgrade_dialog("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
                 if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                    st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                    st.error("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
 
                 push_history()
@@ -1625,10 +1608,10 @@ with col1:
             st.markdown("### 複数ノード操作")
         if st.button("🗑️ ノードを削除"):
             if target_scope_key != "focused" and st.session_state.edition == "FREE":
-                show_upgrade_dialog("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                show_upgrade_dialog("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                 st.stop()
             if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                st.error("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                 st.stop()
 
             push_history()
@@ -1652,10 +1635,10 @@ with col1:
             move_pos = st.radio("移動位置", ["after", "before"], key="qa_move_pos", horizontal=True, format_func=lambda x: "後" if x == "after" else "前")
             if st.button("ノードを移動"):
                 if target_scope_key != "focused" and st.session_state.edition == "FREE":
-                    show_upgrade_dialog("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                    show_upgrade_dialog("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
                 if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                    st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                    st.error("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
 
                 push_history()
@@ -1753,10 +1736,10 @@ with col1:
             st.markdown("---")
             if st.button("📋 ノードを複製"):
                 if target_scope_key != "focused" and st.session_state.edition == "FREE":
-                    show_upgrade_dialog("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                    show_upgrade_dialog("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
                 if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                    st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
+                    st.error("Lite版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
 
                 push_history()
@@ -2022,7 +2005,7 @@ with col2:
                             old_structure = extract_module_structure_from_text(target_line.current_text)
                             new_structure = extract_module_structure_from_text(new_text)
                             if old_structure != new_structure:
-                                st.error("Free版ではModuleタグの追加・削除・変更はできません。通常のプロンプト本文だけを編集してください。Module作成・編集はPro版機能です。")
+                                st.error("Lite版ではModuleタグの追加・削除・変更はできません。通常のプロンプト本文だけを編集してください。Module作成・編集はPro版機能です。")
                                 st.stop()
                         update_line_text(target_line.id, new_text)
                         st.rerun()
@@ -2168,7 +2151,7 @@ with col2:
                         if new_text != l.current_text:
                             if st.button("変更を保存", key=f"save_{l.id}"):
                                 if is_free() and not st.session_state.get("focused_line_id"):
-                                    st.error("Free版では編集にフォーカス編集が必要です。フォーカス編集に入ってから編集してください。")
+                                    st.error("Lite版では編集にフォーカス編集が必要です。フォーカス編集に入ってから編集してください。")
                                     st.stop()
                                 update_line_text(l.id, new_text)
                                 st.rerun()
@@ -2187,7 +2170,7 @@ with col2:
                             st.rerun()
                         if c4.button("削除", key=f"del_{l.id}"):
                             if is_free() and not st.session_state.get("focused_line_id"):
-                                st.error("Free版では編集にフォーカス編集が必要です。フォーカス編集に入ってから編集してください。")
+                                st.error("Lite版では編集にフォーカス編集が必要です。フォーカス編集に入ってから編集してください。")
                                 st.stop()
                             delete_line(l.id)
                             st.rerun()
