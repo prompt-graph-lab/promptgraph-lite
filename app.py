@@ -4,6 +4,7 @@ from core.io import load_directory, export_to_txt, save_project_to_json, load_pr
 from core.graph_builder import build_graph
 from core.operations import rename_node, delete_nodes, insert_node, duplicate_nodes, move_nodes, merge_duplicates_in_line, merge_duplicates_all_lines, apply_node_weight, insert_subgraph, replace_with_subgraph, rename_word_global, delete_word_global, insert_word_global, count_matches, get_available_modules, get_active_tokens, get_display_tokens, get_display_tokens_from_text, extract_module_structure_from_text
 from core.parser import parse_prompt
+from core.project import Project
 import streamlit.components.v1 as components
 import os
 import uuid
@@ -49,7 +50,7 @@ if "history" not in st.session_state:
 if "project" not in st.session_state:
     st.session_state.project = None
 if "current_project_path" not in st.session_state:
-    st.session_state.current_project_path = st.session_state.settings.get("last_project", "")
+    st.session_state.current_project_path = ""
 if "selected_node_ids" not in st.session_state:
     st.session_state.selected_node_ids = []
 if "disabled_modules" not in st.session_state:
@@ -90,6 +91,18 @@ def sync_text_areas():
             focus_key = f"focus_text_{line.id}"
             if focus_key in st.session_state:
                 st.session_state[focus_key] = line.current_text
+
+def start_new_project():
+    st.session_state.history = []
+    st.session_state.project = build_graph(Project(source_directory=""))
+    st.session_state.current_project_path = ""
+    st.session_state.focused_line_id = None
+    st.session_state.selected_node_ids = []
+    st.session_state.disabled_modules = set()
+    st.session_state.connect_mode = False
+    st.session_state.connect_nodes = []
+    st.session_state.shortcut_feedback = ""
+    st.session_state.branch_feedback = ""
 
 def load_project_json_into_session(project_path: str) -> bool:
     if not os.path.exists(project_path):
@@ -831,43 +844,40 @@ def show_image_dialog(image_path: str, prompt_text: str):
 st.set_page_config(page_title="PromptGraph Lite", layout="wide")
 
 if st.session_state.show_tutorial:
-    st.title("🎉 PromptGraph Liteへようこそ！")
+    st.title("Welcome to PromptGraph Lite")
 
     st.markdown("""
-    PromptGraph Liteは、既存のAIイラスト資産やプロンプト集を**読み込み、行単位の系譜として編集し、再利用するための入口**です。
+    PromptGraph Lite is a story workspace for turning AI illustration assets into editable scene lineage.
 
     ---
 
-    ## 🧭 基本の流れ
+    ## Story workflow
 
-    1. **Import Existing Assets**: 既存の `.txt` と同名画像を読み込みます。
-    2. **Prompt Lineage**: Linesでプロンプト行を確認し、編集対象を選びます。
-    3. **Focus Edit / Branch Story**: 既存行からBranchを作り、1行ずつ安全に編集します。
-    4. **Export / Generate**: Focus Editから1枚ずつ生成し、候補をAfter/Referenceに採用できます。
-    5. **Project Management**: JSONで長期作業用に保存・再開します。
+    **Create or open a story workspace.**
+    Start with New Project when you want a fresh scene chain, or open a saved lineage JSON.
 
-    GraphとPrompt Cloudは、プロンプトのつながりやProで広がる編集可能性を確認するプレビューです。
+    **Bring in existing assets.**
+    Import prompt files and matching images when you already have an AI illustration collection.
 
-    ---
+    **Choose one scene and continue.**
+    Use Prompt Lineage to select a scene, then Focus Edit to Branch, Continue Story, or Generate candidates.
 
-    ## 🔍 このツールのポイント
-
-    - グラフで単語のつながりが見える
-    - Word Cloudで頻出ワードがわかる
-    - Active Prompt Previewで結果を確認できる
+    **Save the workspace.**
+    Keep the lineage as JSON, or export the active prompts to TXT.
 
     ---
 
-    ## ⚠ Free版の制限
+    ## Lite guardrails
 
-    - 一括編集、Module作成、ComfyUIの一括生成はPro機能です
-    - LiteではFocus Editを中心に、既存資産を安全に理解・編集します
+    - Focus Edit keeps changes scoped to one scene at a time.
+    - Batch generation, broad global editing, and module authoring remain Pro features.
+    - Graph and Prompt Cloud views are preview aids for understanding scene structure.
 
     ---
 
-    👉 まずはサイドバーの **Import / Load Assets** から始めてください。
+    Start in the sidebar with **New Project**, **Open Last Project**, or **Import Directory**.
 
-    「このチュートリアルは、サイドバーの Help → Show Tutorial からいつでも再表示できます。」
+    You can reopen this guide from **Help -> Show Tutorial**.
     """)
 
     if st.button("Start Exploring PromptGraph Lite"):
@@ -877,22 +887,22 @@ if st.session_state.show_tutorial:
     st.stop()
 
 st.sidebar.title("PromptGraph Lite")
-st.sidebar.caption("既存資産を読み込み、Prompt LineageをFocus Editで安全に分岐・再利用します。")
+st.sidebar.caption("Build a scene lineage from existing assets, one branch or continuation at a time.")
 
 inject_keyboard_shortcuts()
 render_shortcut_actions()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Project Management")
-st.sidebar.caption("Save this story workspace and resume the lineage project later.")
+st.sidebar.subheader("Story Workspace")
+st.sidebar.warning("First, create or open a lineage workspace.")
 
 current_project_path = st.session_state.get("current_project_path") or ""
 if current_project_path:
     st.sidebar.code(current_project_path, language="text")
 elif st.session_state.project:
-    st.sidebar.info("Unsaved lineage project")
+    st.sidebar.success("Unsaved story workspace is active.")
 else:
-    st.sidebar.info("No project loaded")
+    st.sidebar.info("No workspace yet. Start a new story or open a saved lineage.")
 
 overview = project_stats(st.session_state.project)
 with st.sidebar.expander("Project Overview", expanded=bool(st.session_state.project)):
@@ -914,21 +924,15 @@ json_path_default = current_project_path or "project.json"
 
 project_cols = st.sidebar.columns(2)
 with project_cols[0]:
-    if st.button("Open Last", disabled=not last_project_path, key="open_last_project"):
+    if st.button("New Project", type="primary", key="new_story_project"):
+        start_new_project()
+        st.success("New story workspace created.")
+        st.rerun()
+with project_cols[1]:
+    if st.button("Open Last Project", disabled=not last_project_path, key="open_last_project"):
         if load_project_json_into_session(last_project_path):
             st.success("Project loaded.")
             st.rerun()
-with project_cols[1]:
-    quick_save_disabled = not bool(st.session_state.project)
-    if st.button("Save", disabled=quick_save_disabled, key="quick_save_project"):
-        save_project_to_json(st.session_state.project, json_path_default)
-        st.session_state.current_project_path = os.path.abspath(json_path_default)
-        st.session_state.settings = remember_project(
-            st.session_state.settings,
-            st.session_state.current_project_path,
-        )
-        save_settings(st.session_state.settings)
-        st.success("Project saved.")
 
 with st.sidebar.expander("Open Project", expanded=False):
     st.markdown("**Recent Projects**")
@@ -951,34 +955,20 @@ with st.sidebar.expander("Open Project", expanded=False):
     else:
         st.caption("No recent projects yet.")
 
-    st.markdown("**Other Project (JSON file)**")
+    st.markdown("**Open Existing Project**")
     open_project_path = st.text_input("Project (JSON file)", project_file_default, key="open_project_path")
     if st.button("Open Project"):
         if load_project_json_into_session(open_project_path):
             st.success("Project loaded.")
             st.rerun()
 
-with st.sidebar.expander("Save As", expanded=False):
-    st.caption("Save this lineage workspace as JSON, including candidates and continued lines.")
-    json_path = st.text_input("Project (JSON file)", json_path_default, key="save_project_json_path")
-    if st.button("Save Current Project"):
-        if st.session_state.project:
-            save_project_to_json(st.session_state.project, json_path)
-            st.session_state.current_project_path = os.path.abspath(json_path)
-            st.session_state.settings = remember_project(
-                st.session_state.settings,
-                st.session_state.current_project_path,
-            )
-            save_settings(st.session_state.settings)
-            st.success("Project saved.")
-
 # Directory loading
 st.sidebar.markdown("---")
-st.sidebar.subheader("1. Import / Load Assets")
-st.sidebar.caption("既存のプロンプトTXTと、同名のPNG/JPG画像をプロジェクトとして読み込みます。")
+st.sidebar.subheader("Start from Existing Assets")
+st.sidebar.warning("Import prompts, images, or PNG metadata into the active lineage.")
 target_dir = st.sidebar.text_input("Source Directory", st.session_state.settings.get("last_source_directory", "./dummy_data"))
 
-if st.sidebar.button("Load Directory"):
+if st.sidebar.button("Import Directory", key="import_directory"):
     if os.path.isdir(target_dir):
         st.session_state.history = []
         with st.spinner("Building full graph..."):
@@ -992,24 +982,34 @@ if st.sidebar.button("Load Directory"):
         
         st.session_state.settings["last_source_directory"] = target_dir
         save_settings(st.session_state.settings)
-        st.sidebar.success(f"Loaded from {target_dir}")
+        st.sidebar.success(f"Imported assets from {target_dir}")
+        st.rerun()
     else:
         st.sidebar.error("Invalid directory path")
 
+st.sidebar.button(
+    "PNG Metadata Import (Preview)",
+    disabled=True,
+    help="Preview label only. Directory import remains the supported Lite asset flow.",
+    key="png_metadata_import_preview",
+)
+
 st.sidebar.markdown("---")
-st.sidebar.subheader("Lite Workflow Status")
-edition_label = "💎 PRO" if st.session_state.edition == "PRO" else "🆓 FREE"
+st.sidebar.subheader("Create & Continue Scenes")
+st.sidebar.info("Use Focus Edit to branch from a scene, continue the story, then generate candidates.")
+st.sidebar.markdown("- Focus Edit\n- Create Branch\n- Continue Story\n- Generate Candidates")
+edition_label = "PRO" if st.session_state.edition == "PRO" else "FREE"
 st.sidebar.write(f"**Edition:** {edition_label}")
 
-scope_mode = "🎯 Focus Edit Mode" if st.session_state.get("focused_line_id") else "🌐 Global View"
+scope_mode = "Focus Edit Mode" if st.session_state.get("focused_line_id") else "Global View"
 st.sidebar.write(f"**Edit Scope:** {scope_mode}")
 
-if st.session_state.get("focused_line_id"):
+if st.session_state.get("focused_line_id") and st.session_state.project:
     line = next((l for l in st.session_state.project.prompt_lines if l.id == st.session_state.focused_line_id), None)
     if line:
         st.sidebar.caption(f"Target: {line.original_file_name}")
 elif is_free():
-    st.sidebar.info("Liteでは編集対象を1行に絞るFocus Editが基本です。Prompt Lineageから行を選びます。")
+    st.sidebar.info("Select a scene in Prompt Lineage, then use Focus Edit before branching or continuing.")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("Help")
@@ -1027,11 +1027,11 @@ with st.sidebar.expander("Keyboard Shortcuts", expanded=False):
 if st.session_state.get("shortcut_feedback"):
     st.sidebar.caption(f"Shortcut: {st.session_state.shortcut_feedback}")
 
-if st.sidebar.button("📘 Show Tutorial"):
+if st.sidebar.button("Show Tutorial"):
     st.session_state.show_tutorial = True
     st.rerun()
 
-st.sidebar.caption("基本操作：Import → Prompt Lineage → Focus Edit → Export / Project Save")
+st.sidebar.caption("Workflow: workspace -> assets -> Focus Edit -> Branch or Continue -> Save.")
 
 # Depth calculation (kept internally)
 
@@ -1044,8 +1044,8 @@ if "display_depth" not in st.session_state:
     st.session_state.display_depth = max(0, max_depth)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("6. Graph / Prompt Cloud Preview")
-st.sidebar.caption("可視化はLiteの理解補助です。広範囲の構造編集はProの領域です。")
+st.sidebar.subheader("Lineage Preview")
+st.sidebar.caption("Search and preview prompt structure after scenes are imported or created.")
 
 search_query = st.sidebar.text_input("Search Node (Word)")
 if st.sidebar.button("Search") and search_query:
@@ -1157,12 +1157,41 @@ else:
 
 st.sidebar.markdown("---")
 # Export/Save
-st.sidebar.subheader("4. Export / Generate Result")
+st.sidebar.subheader("Save & Export")
+st.sidebar.warning("Save your lineage workspace and export scene prompts when ready.")
 # TODO: Add export modes: combined TXT / overwrite original files / write to separate output directory
 # 「Free版でのExport/Save許可はプレ公開方針。必要なら後で制限する。」
+save_cols = st.sidebar.columns(2)
+with save_cols[0]:
+    if st.button("Save Project", disabled=not bool(st.session_state.project), key="quick_save_project"):
+        save_project_to_json(st.session_state.project, json_path_default)
+        st.session_state.current_project_path = os.path.abspath(json_path_default)
+        st.session_state.settings = remember_project(
+            st.session_state.settings,
+            st.session_state.current_project_path,
+        )
+        save_settings(st.session_state.settings)
+        st.success("Project saved.")
+with save_cols[1]:
+    st.button("Export Prompt/Image Set", disabled=True, help="Deferred for Lite; TXT export remains available.")
+
+with st.sidebar.expander("Save As", expanded=False):
+    st.caption("Save this lineage workspace as JSON, including candidates and continued lines.")
+    json_path = st.text_input("Project (JSON file)", json_path_default, key="save_project_json_path")
+    if st.button("Save Current Project"):
+        if st.session_state.project:
+            save_project_to_json(st.session_state.project, json_path)
+            st.session_state.current_project_path = os.path.abspath(json_path)
+            st.session_state.settings = remember_project(
+                st.session_state.settings,
+                st.session_state.current_project_path,
+            )
+            save_settings(st.session_state.settings)
+            st.success("Project saved.")
+
 export_path = st.sidebar.text_input("Export Combined TXT Path", st.session_state.settings.get("last_export_path", "prompts.txt"))
-st.sidebar.caption("現在は全プロンプトを1つのTXTにまとめて書き出します。元ファイル上書き/個別ファイル出力は今後対応予定です。")
-if st.sidebar.button("Export Combined TXT"):
+st.sidebar.caption("Export the current story prompts as one TXT. Per-file export is intentionally deferred.")
+if st.sidebar.button("Export TXT"):
     if st.session_state.project:
         export_to_txt(st.session_state.project, export_path, disabled_modules=st.session_state.disabled_modules)
         st.session_state.settings["last_export_path"] = export_path
@@ -1172,7 +1201,25 @@ if st.sidebar.button("Export Combined TXT"):
 st.sidebar.caption("Lite supports single-image generation from Focus Edit. Batch generation remains a Pro feature.")
 
 if not st.session_state.project:
-    st.info("Start with Import / Load Assets in the sidebar, or load a saved project JSON from Project Management.")
+    st.title("Create a story workspace")
+    st.info("Start with New Project, Open Last Project, or Open Existing Project in the sidebar.")
+    st.markdown("""
+    **Next steps**
+    - Create a story workspace for a new scene chain.
+    - Import existing assets when you already have prompt or image collections.
+    - Start from one generated scene, then use Focus Edit to branch or continue.
+    """)
+    st.stop()
+
+if not st.session_state.project.prompt_lines:
+    st.title("Story workspace is ready")
+    st.success("Your workspace is empty and unsaved. Import existing assets or save it as a new lineage project.")
+    st.markdown("""
+    **Choose the next scene step**
+    - Import a directory of existing prompts and images.
+    - Save the empty workspace if you want a clean project shell first.
+    - After scenes exist, select one in Prompt Lineage to Focus Edit, Branch, Continue, or Generate.
+    """)
     st.stop()
 
 st.sidebar.markdown("---")
@@ -1190,7 +1237,7 @@ st.session_state.comfy_workflow_path = st.sidebar.text_input("Workflow JSON Path
 project = st.session_state.project
 
 st.title("PromptGraph Lite Workflow")
-st.caption("Import existing assets → Edit prompt lineage → Export/regenerate → Manage project → Preview graph and prompt cloud potential.")
+st.caption("Create a story workspace -> import assets -> Focus Edit -> Branch or Continue -> Save and Export.")
 
 col1, col2 = st.columns([1, 1])
 
