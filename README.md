@@ -18,16 +18,15 @@ but also for future AI-assisted workflows and agent-driven prompt systems.
 
 ---
 
-# Lite v1.0 Workflow
+# Lite Story Workflow
 
 PromptGraph Lite is the entry point for the core PromptGraph concept:
 
-1. **Import Existing Assets**: Load existing `.txt` prompt files and same-name PNG/JPG images from a directory.
-2. **Prompt Lineage**: Review each prompt as a reusable line in a larger collection or story sequence.
-3. **Focus Edit / Branch Story**: Safely edit one prompt line at a time, branch from existing lines, and continue the story into the next line.
-4. **Export / Generate Result**: Generate one focused-line candidate at a time, choose After/Reference images, or export active prompts to combined TXT. Batch generation is Pro-only.
-5. **Project Management**: Save, reopen, and review JSON lineage workspaces without changing the project file format.
-6. **Graph / Prompt Cloud Preview**: Inspect repeated words, relationships, and future Pro visualization potential.
+- **Story Workspace**: Create a new lineage workspace or open a saved JSON project before editing.
+- **Start from Existing Assets**: Import `.txt` prompt files and same-name PNG/JPG images from a directory.
+- **Create & Continue Scenes**: Review Prompt Lineage, Focus Edit one scene, then Branch, Continue Story, or Generate candidates.
+- **Save & Export**: Save the lineage workspace as JSON or export active scene prompts to combined TXT. Batch generation is Pro-only.
+- **Lineage Preview**: Inspect repeated words, relationships, and future Pro visualization potential.
 
 Lite is intentionally not a random prompt generator. It is for maintaining, modifying, and reusing existing AI illustration assets and prompt/image collections.
 
