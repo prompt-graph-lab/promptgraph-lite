@@ -106,7 +106,7 @@ def start_new_project():
 
 def load_project_json_into_session(project_path: str) -> bool:
     if not os.path.exists(project_path):
-        st.warning(f"Project file not found: {project_path}")
+        st.warning(f"プロジェクトファイルが見つかりません: {project_path}")
         return False
 
     st.session_state.history = []
@@ -289,14 +289,14 @@ def render_shortcut_actions():
         st.session_state.connect_nodes = []
         if "selected_lines" in st.session_state:
             st.session_state.selected_lines = {}
-        st.session_state.shortcut_feedback = "Selection cleared"
+        st.session_state.shortcut_feedback = "選択を解除しました"
         st.rerun()
 
     if shortcut_undo and st.session_state.history:
         prev_focus = st.session_state.get("focused_line_id")
         undo()
         restore_focus_after_graph_update(prev_focus)
-        st.session_state.shortcut_feedback = "Undo"
+        st.session_state.shortcut_feedback = "元に戻しました"
         st.rerun()
 
     if save_focused_line:
@@ -308,29 +308,29 @@ def render_shortcut_actions():
                     old_structure = extract_module_structure_from_text(line.current_text)
                     new_structure = extract_module_structure_from_text(new_text)
                     if old_structure != new_structure:
-                        st.session_state.shortcut_feedback = "Save blocked"
-                        st.error("Free edition cannot change module tags.")
+                        st.session_state.shortcut_feedback = "保存できません"
+                        st.error("Free版ではModuleタグを変更できません。")
                         st.stop()
                 update_line_text(line.id, new_text)
-                st.session_state.shortcut_feedback = "Saved focused line"
+                st.session_state.shortcut_feedback = "フォーカス中の生成ソースを保存しました"
                 st.rerun()
             else:
-                st.session_state.shortcut_feedback = "No changes to save"
+                st.session_state.shortcut_feedback = "保存する変更はありません"
                 st.rerun()
         else:
-            st.session_state.shortcut_feedback = "No focused line"
+            st.session_state.shortcut_feedback = "フォーカス中のイラストがありません"
             st.rerun()
 
     if copy_success:
-        st.session_state.shortcut_feedback = "Copied focused line prompt"
+        st.session_state.shortcut_feedback = "フォーカス中の生成ソースをコピーしました"
         st.rerun()
 
     if copy_failed:
-        st.session_state.shortcut_feedback = "Copy failed"
+        st.session_state.shortcut_feedback = "コピーに失敗しました"
         st.rerun()
 
     if focus_editor:
-        st.session_state.shortcut_feedback = "Focused line editor"
+        st.session_state.shortcut_feedback = "編集欄にフォーカスしました"
         st.rerun()
 
 def update_line_text(line_id: str, new_text: str):
@@ -472,8 +472,8 @@ def project_stats(project) -> dict:
     }
 
 REGULAR_COMFY_WORKFLOW_ERROR = (
-    "This appears to be a regular ComfyUI workflow JSON. Please use API-format workflow_api.json "
-    "exported with Enable Dev Mode Options → Save (API Format)."
+    "通常形式のComfyUI workflow JSONのようです。Enable Dev Mode Options → Save (API Format)で出力した"
+    "API形式のworkflow_api.jsonを使用してください。"
 )
 
 def _load_json_from_text(value: str):
@@ -506,7 +506,7 @@ def _validate_api_comfy_workflow(workflow_json):
     if _is_regular_comfy_ui_workflow(workflow_json):
         raise ValueError(REGULAR_COMFY_WORKFLOW_ERROR)
     if not _is_executable_comfy_workflow(workflow_json):
-        raise ValueError("Workflow JSON is not a ComfyUI API-format workflow with node inputs.")
+        raise ValueError("workflow JSONがComfyUI API形式ではないか、ノード入力がありません。")
 
 def _replace_clip_text_prompts(workflow_json, line):
     if not isinstance(workflow_json, dict):
@@ -620,7 +620,7 @@ def set_candidate_as_reference(line, image_path: str):
 
 def build_lite_generation_workflow(target_line):
     if not os.path.exists(st.session_state.comfy_workflow_path):
-        raise FileNotFoundError(f"Workflow JSON not found at {st.session_state.comfy_workflow_path}")
+        raise FileNotFoundError(f"workflow JSONが見つかりません: {st.session_state.comfy_workflow_path}")
 
     with open(st.session_state.comfy_workflow_path, 'r', encoding='utf-8') as f:
         wf_str = f.read()
@@ -642,7 +642,7 @@ def build_lite_generation_workflow(target_line):
         workflow_json = json.loads(wf_str)
         _validate_api_comfy_workflow(workflow_json)
         if _replace_clip_text_prompts(workflow_json, injection_line) == 0:
-            st.warning("The workflow JSON does not contain '__PROMPT__'. The prompt may not be injected.")
+            st.warning("workflow JSONに'__PROMPT__'がありません。プロンプトが反映されない可能性があります。")
         return workflow_json
 
     escaped_prompt = json.dumps(", ".join(active_tokens))[1:-1]
@@ -651,18 +651,18 @@ def build_lite_generation_workflow(target_line):
     return workflow_json
 
 def render_lite_comfy_workflow_debug_preview(target_line):
-    with st.expander("Debug: ComfyUI Workflow Preview", expanded=False):
-        st.caption("Shared workflow JSON path")
+    with st.expander("Debug: ComfyUI workflowプレビュー", expanded=False):
+        st.caption("共有workflow JSONパス")
         st.code(st.session_state.comfy_workflow_path or "(not set)", language="text")
         if not os.path.exists(st.session_state.comfy_workflow_path):
-            st.warning(f"Workflow JSON not found at {st.session_state.comfy_workflow_path}")
+            st.warning(f"workflow JSONが見つかりません: {st.session_state.comfy_workflow_path}")
             return
         try:
             workflow_json = build_lite_generation_workflow(target_line)
-            st.caption("Final injected API-format workflow JSON")
+            st.caption("プロンプト反映後のAPI形式workflow JSON")
             st.code(json.dumps(workflow_json, indent=2, ensure_ascii=False), language="json")
         except Exception as exc:
-            st.warning(f"Could not build workflow preview: {exc}")
+            st.warning(f"workflowプレビューを作成できませんでした: {exc}")
 
 def move_line(line_id: str, visible_line_ids: list[str], direction: str) -> bool:
     if line_id not in visible_line_ids:
@@ -700,24 +700,24 @@ def move_line(line_id: str, visible_line_ids: list[str], direction: str) -> bool
     sync_text_areas()
     return True
 
-@st.dialog("Upgrade to Pro Edition")
+@st.dialog("Pro版について")
 def show_upgrade_dialog(message: str):
     st.warning(message)
     st.markdown("""
-    ### 🚀 Unlock the Full Power of PromptGraph Pro
-    
-    The Pro edition is designed for high-velocity workflows and large datasets.
-    
-    **Pro Features:**
-    - **Bulk Editing**: Execute global operations across your entire dataset in one click.
-    - **Module Authoring**: Create and save your own reusable prompt modules.
-    - **Direct Workflow Sync**: Execute ComfyUI generations directly from the IDE.
-    - **Automation Loop**: Auto-rerun workflows as you edit your prompt graph.
-    - **Advanced Analytics**: Deep insights into your prompt structure.
-    
-    [Support on FANBOX & Get Pro](https://example.com/fanbox)
+    ### 🚀 PromptGraph Proでできること
+
+    Pro版は、大きなイラスト集や長期プロジェクトを高速に扱うための上位版です。
+
+    **Pro版機能:**
+    - **一括編集**: イラスト集全体にまたがる操作をまとめて実行できます。
+    - **Module作成**: 再利用できるプロンプトModuleを作成・保存できます。
+    - **ワークフロー同期**: ComfyUI生成をIDEから直接実行できます。
+    - **自動生成ループ**: 編集に合わせた再生成フローを扱えます。
+    - **高度な分析**: 生成ソース構造をより深く確認できます。
+
+    [FANBOXで支援・Pro版を確認](https://example.com/fanbox)
     """)
-    if st.button("Close"):
+    if st.button("閉じる"):
         st.rerun()
 
 def get_structural_stats(old_text, new_text):
@@ -756,7 +756,7 @@ def require_pro(message: str) -> bool:
         return False
     return True
 
-def get_free_target_lines_or_block(message: str = "「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」"):
+def get_free_target_lines_or_block(message: str = "Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。"):
     if is_free():
         focused = st.session_state.get("focused_line_id")
         if not focused:
@@ -837,85 +837,85 @@ def show_image_dialog(image_path: str, prompt_text: str):
     if image_path and os.path.exists(image_path):
         st.image(image_path, width="stretch")
     else:
-        st.info("No Image Available")
-    st.markdown("**Prompt:**")
+        st.info("画像はありません")
+    st.markdown("**生成ソース:**")
     st.code(prompt_text, language="text")
 
 st.set_page_config(page_title="PromptGraph Lite", layout="wide")
 
 if st.session_state.show_tutorial:
-    st.title("Welcome to PromptGraph Lite")
+    st.title("PromptGraph Liteへようこそ")
 
     st.markdown("""
-    PromptGraph Lite is a story workspace for turning AI illustration assets into editable scene lineage.
+    PromptGraph Liteは、AIイラスト集を読み込み、生成ソースを確認しながら別ルートや続きのイラストを作るためのワークスペースです。
 
     ---
 
-    ## Story workflow
+    ## 基本の流れ
 
-    **Create or open a story workspace.**
-    Start with New Project when you want a fresh scene chain, or open a saved lineage JSON.
+    **新規プロジェクトを作成するか、保存済みプロジェクトを開きます。**
+    長く育てるイラスト集はJSONプロジェクトとして保存できます。
 
-    **Bring in existing assets.**
-    Import prompt files and matching images when you already have an AI illustration collection.
+    **既存イラスト集を読み込みます。**
+    既存のプロンプトTXTと対応する画像をフォルダから読み込めます。
 
-    **Choose one scene and continue.**
-    Use Prompt Lineage to select a scene, then Focus Edit to Branch, Continue Story, or Generate candidates.
+    **イラストを1つ選び、フォーカス編集します。**
+    イラストラインから対象を選び、別ルートのイラストや、このルートの次のイラストを作成します。
 
-    **Save the workspace.**
-    Keep the lineage as JSON, or export the active prompts to TXT.
-
-    ---
-
-    ## Lite guardrails
-
-    - Focus Edit keeps changes scoped to one scene at a time.
-    - Batch generation, broad global editing, and module authoring remain Pro features.
-    - Graph and Prompt Cloud views are preview aids for understanding scene structure.
+    **候補イラストを生成・比較し、採用結果を残します。**
+    採用イラストや元のイラストを選び、生成ソースをTXTとして出力できます。
 
     ---
 
-    Start in the sidebar with **New Project**, **Open Last Project**, or **Import Directory**.
+    ## Lite版の制限
 
-    You can reopen this guide from **Help -> Show Tutorial**.
+    - 編集はフォーカス編集中の1イラストを中心に行います。
+    - 一括生成、広範囲の一括編集、Module作成はPro版機能です。
+    - グラフとPrompt Cloudは、生成ソースの構造を理解するためのプレビューです。
+
+    ---
+
+    まずはサイドバーの **新規プロジェクト**、**前回のプロジェクトを開く**、または **フォルダから読み込む** から始めてください。
+
+    この案内は **ヘルプ -> 使い方を表示** から再表示できます。
     """)
 
-    if st.button("Start Exploring PromptGraph Lite"):
+    if st.button("PromptGraph Liteを始める"):
         st.session_state.show_tutorial = False
         st.rerun()
 
     st.stop()
 
 st.sidebar.title("PromptGraph Lite")
-st.sidebar.caption("Build a scene lineage from existing assets, one branch or continuation at a time.")
+st.sidebar.caption("AIイラスト集を読み込み、別ルートや続きのイラストを育てます。")
 
 inject_keyboard_shortcuts()
 render_shortcut_actions()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Story Workspace")
-st.sidebar.warning("First, create or open a lineage workspace.")
+st.sidebar.subheader("イラスト集ワークスペース")
+st.sidebar.warning("まず、新規プロジェクトを作成するか、保存済みプロジェクトを開いてください。")
 
 current_project_path = st.session_state.get("current_project_path") or ""
 if current_project_path:
     st.sidebar.code(current_project_path, language="text")
 elif st.session_state.project:
-    st.sidebar.success("Unsaved story workspace is active.")
+    st.sidebar.success("未保存のイラスト集ワークスペースを編集中です。")
 else:
-    st.sidebar.info("No workspace yet. Start a new story or open a saved lineage.")
+    st.sidebar.info("プロジェクトはまだ開かれていません。新規作成または保存済みプロジェクトを開いてください。")
 
 overview = project_stats(st.session_state.project)
-with st.sidebar.expander("Project Overview", expanded=bool(st.session_state.project)):
-    st.caption("Track lines, branches, continuations, and generated candidates.")
-    st.caption(f"Source: {overview['source_directory'] or '(not set)'}")
-    st.caption(f"Project JSON: {current_project_path or '(not saved yet)'}")
+with st.sidebar.expander("プロジェクト概要", expanded=bool(st.session_state.project)):
+    st.caption("有効なイラスト、別ルート、続き、候補イラスト、採用イラストを確認します。")
+    st.caption(f"読み込み元: {overview['source_directory'] or '(未設定)'}")
+    st.caption(f"プロジェクトJSON: {current_project_path or '(未保存)'}")
     metric_cols = st.columns(2)
-    metric_cols[0].metric("Active Lines", overview["active_lines"])
-    metric_cols[1].metric("Branches", overview["branch_lines"])
+    metric_cols[0].metric("有効なイラスト", overview["active_lines"])
+    metric_cols[1].metric("別ルート", overview["branch_lines"])
     metric_cols = st.columns(2)
-    metric_cols[0].metric("Continued", overview["continued_lines"])
-    metric_cols[1].metric("Candidates", overview["candidate_images"])
-    st.metric("After Images", overview["after_images"])
+    metric_cols[0].metric("続き", overview["continued_lines"])
+    metric_cols[1].metric("候補イラスト", overview["candidate_images"])
+    st.metric("採用イラスト", overview["after_images"])
 
 last_project_path = get_last_project_path(st.session_state.settings)
 recent_projects = get_recent_projects(st.session_state.settings)
@@ -924,22 +924,22 @@ json_path_default = current_project_path or "project.json"
 
 project_cols = st.sidebar.columns(2)
 with project_cols[0]:
-    if st.button("New Project", type="primary", key="new_story_project"):
+    if st.button("新規プロジェクト", type="primary", key="new_story_project"):
         start_new_project()
-        st.success("New story workspace created.")
+        st.success("新しいイラスト集ワークスペースを作成しました。")
         st.rerun()
 with project_cols[1]:
-    if st.button("Open Last Project", disabled=not last_project_path, key="open_last_project"):
+    if st.button("前回のプロジェクトを開く", disabled=not last_project_path, key="open_last_project"):
         if load_project_json_into_session(last_project_path):
-            st.success("Project loaded.")
+            st.success("プロジェクトを開きました。")
             st.rerun()
 
-with st.sidebar.expander("Open Project", expanded=False):
-    st.markdown("**Recent Projects**")
+with st.sidebar.expander("プロジェクトを開く", expanded=False):
+    st.markdown("**最近使ったプロジェクト**")
     if recent_projects:
         recent_options = [item["path"] for item in recent_projects]
         recent_project_path = st.selectbox(
-            "Recent Projects",
+            "最近使ったプロジェクト",
             recent_options,
             format_func=lambda path: next(
                 (item["name"] for item in recent_projects if item["path"] == path),
@@ -948,30 +948,30 @@ with st.sidebar.expander("Open Project", expanded=False):
             label_visibility="collapsed",
         )
         st.caption(recent_project_path)
-        if st.button("Open Recent Project"):
+        if st.button("最近使ったプロジェクトを開く"):
             if load_project_json_into_session(recent_project_path):
-                st.success("Project loaded.")
+                st.success("プロジェクトを開きました。")
                 st.rerun()
     else:
-        st.caption("No recent projects yet.")
+        st.caption("最近使ったプロジェクトはまだありません。")
 
-    st.markdown("**Open Existing Project**")
-    open_project_path = st.text_input("Project (JSON file)", project_file_default, key="open_project_path")
-    if st.button("Open Project"):
+    st.markdown("**保存済みプロジェクトを開く**")
+    open_project_path = st.text_input("プロジェクトJSON", project_file_default, key="open_project_path")
+    if st.button("プロジェクトを開く"):
         if load_project_json_into_session(open_project_path):
-            st.success("Project loaded.")
+            st.success("プロジェクトを開きました。")
             st.rerun()
 
 # Directory loading
 st.sidebar.markdown("---")
-st.sidebar.subheader("Start from Existing Assets")
-st.sidebar.warning("Import prompts, images, or PNG metadata into the active lineage.")
-target_dir = st.sidebar.text_input("Source Directory", st.session_state.settings.get("last_source_directory", "./dummy_data"))
+st.sidebar.subheader("既存イラスト集を読み込む")
+st.sidebar.warning("プロンプト、画像、またはPNGメタデータをイラストラインに読み込みます。")
+target_dir = st.sidebar.text_input("読み込みフォルダ", st.session_state.settings.get("last_source_directory", "./dummy_data"))
 
-if st.sidebar.button("Import Directory", key="import_directory"):
+if st.sidebar.button("フォルダから読み込む", key="import_directory"):
     if os.path.isdir(target_dir):
         st.session_state.history = []
-        with st.spinner("Building full graph..."):
+        with st.spinner("イラストラインを構築しています..."):
             project = load_directory(target_dir, max_depth=None)
             project = build_graph(project)
         st.session_state.project = project
@@ -982,56 +982,56 @@ if st.sidebar.button("Import Directory", key="import_directory"):
         
         st.session_state.settings["last_source_directory"] = target_dir
         save_settings(st.session_state.settings)
-        st.sidebar.success(f"Imported assets from {target_dir}")
+        st.sidebar.success(f"読み込みました: {target_dir}")
         st.rerun()
     else:
-        st.sidebar.error("Invalid directory path")
+        st.sidebar.error("フォルダパスが正しくありません。")
 
 st.sidebar.button(
-    "PNG Metadata Import (Preview)",
+    "PNGメタデータ読み込み（Preview）",
     disabled=True,
-    help="Preview label only. Directory import remains the supported Lite asset flow.",
+    help="Preview表示です。Liteではフォルダ読み込みが現在の対応フローです。",
     key="png_metadata_import_preview",
 )
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Create & Continue Scenes")
-st.sidebar.info("Use Focus Edit to branch from a scene, continue the story, then generate candidates.")
-st.sidebar.markdown("- Focus Edit\n- Create Branch\n- Continue Story\n- Generate Candidates")
+st.sidebar.subheader("イラストを編集・分岐・継続する")
+st.sidebar.info("イラストを選んでフォーカス編集に入り、別ルートや続きのイラストを作成します。")
+st.sidebar.markdown("- フォーカス編集\n- 別ルートのイラストを作る\n- このルートの次のイラストを作る\n- 候補イラストを生成する")
 edition_label = "PRO" if st.session_state.edition == "PRO" else "FREE"
-st.sidebar.write(f"**Edition:** {edition_label}")
+st.sidebar.write(f"**エディション:** {edition_label}")
 
-scope_mode = "Focus Edit Mode" if st.session_state.get("focused_line_id") else "Global View"
-st.sidebar.write(f"**Edit Scope:** {scope_mode}")
+scope_mode = "フォーカス編集" if st.session_state.get("focused_line_id") else "全体表示"
+st.sidebar.write(f"**編集範囲:** {scope_mode}")
 
 if st.session_state.get("focused_line_id") and st.session_state.project:
     line = next((l for l in st.session_state.project.prompt_lines if l.id == st.session_state.focused_line_id), None)
     if line:
-        st.sidebar.caption(f"Target: {line.original_file_name}")
+        st.sidebar.caption(f"対象: {line.original_file_name}")
 elif is_free():
-    st.sidebar.info("Select a scene in Prompt Lineage, then use Focus Edit before branching or continuing.")
+    st.sidebar.info("イラストラインで対象を選び、フォーカス編集に入ってから分岐・継続してください。")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Help")
-with st.sidebar.expander("Keyboard Shortcuts", expanded=False):
-    st.markdown("- `Esc`: Clear graph selection")
-    st.markdown("- `Ctrl/Cmd+Z`: Undo when not typing")
-    st.markdown("- `Ctrl/Cmd+S`: Save focused line")
-    st.markdown("- `Enter` / `F2`: Focus the line editor")
-    st.markdown("- `Ctrl/Cmd+C`: Copy focused line prompt")
+st.sidebar.subheader("ヘルプ")
+with st.sidebar.expander("キーボードショートカット", expanded=False):
+    st.markdown("- `Esc`: グラフ選択を解除")
+    st.markdown("- `Ctrl/Cmd+Z`: 入力中でないときに取り消し")
+    st.markdown("- `Ctrl/Cmd+S`: フォーカス中の生成ソースを保存")
+    st.markdown("- `Enter` / `F2`: フォーカス中の編集欄へ移動")
+    st.markdown("- `Ctrl/Cmd+C`: フォーカス中の生成ソースをコピー")
     if is_free():
-        st.caption("Lite-safe: shortcuts are mainly for Focus Edit Mode / one-line editing. Global editing remains restricted.")
+        st.caption("Liteではフォーカス編集中の1イラスト編集を中心にショートカットを使います。全体編集は制限されています。")
     else:
-        st.caption("Safe v1 shortcuts only. Destructive global shortcuts are not enabled.")
+        st.caption("安全なv1ショートカットのみ有効です。破壊的な全体ショートカットは有効化していません。")
 
 if st.session_state.get("shortcut_feedback"):
-    st.sidebar.caption(f"Shortcut: {st.session_state.shortcut_feedback}")
+    st.sidebar.caption(f"ショートカット: {st.session_state.shortcut_feedback}")
 
-if st.sidebar.button("Show Tutorial"):
+if st.sidebar.button("使い方を表示"):
     st.session_state.show_tutorial = True
     st.rerun()
 
-st.sidebar.caption("Workflow: workspace -> assets -> Focus Edit -> Branch or Continue -> Save.")
+st.sidebar.caption("流れ: プロジェクト -> 読み込み -> フォーカス編集 -> 分岐・継続 -> 保存")
 
 # Depth calculation (kept internally)
 
@@ -1044,11 +1044,11 @@ if "display_depth" not in st.session_state:
     st.session_state.display_depth = max(0, max_depth)
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Lineage Preview")
-st.sidebar.caption("Search and preview prompt structure after scenes are imported or created.")
+st.sidebar.subheader("イラストライン確認")
+st.sidebar.caption("読み込み後、生成ソースの構造を検索・確認できます。")
 
-search_query = st.sidebar.text_input("Search Node (Word)")
-if st.sidebar.button("Search") and search_query:
+search_query = st.sidebar.text_input("ノード検索（単語）")
+if st.sidebar.button("検索") and search_query:
     if st.session_state.project and st.session_state.project.nodes:
         found_ids = []
         max_found_depth = 0
@@ -1062,17 +1062,17 @@ if st.sidebar.button("Search") and search_query:
             st.session_state.selected_node_ids = found_ids
             st.rerun()
         else:
-            st.sidebar.warning("No nodes found.")
+            st.sidebar.warning("該当するノードはありません。")
 
-focus_mode = st.sidebar.toggle("Path Filter (Show Selected Paths Only)", key="focus_mode")
+focus_mode = st.sidebar.toggle("パスフィルター（選択パスのみ表示）", key="focus_mode")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Graph Preview Settings")
+st.sidebar.subheader("グラフ表示設定")
 
 has_selection = bool(st.session_state.selected_node_ids)
 
 neighborhood_steps = st.sidebar.slider(
-    "Neighborhood Steps",
+    "近傍ステップ",
     min_value=1,
     max_value=5,
     value=st.session_state.get("neighborhood_steps", 2),
@@ -1082,14 +1082,14 @@ neighborhood_steps = st.sidebar.slider(
 )
 
 if not has_selection:
-    st.sidebar.caption("Neighborhood Stepsはノード選択後に有効になります。未選択時は初期Root表示です。")
+    st.sidebar.caption("近傍ステップはノード選択後に有効になります。未選択時は初期Root表示です。")
 
 display_depth = st.session_state.get("display_depth", 2)  # kept internally; not shown in UI
 
 if is_free():
     current_merge = getattr(st.session_state.project, "merge_by_word_only", False) if st.session_state.project else False
     merge_preview = st.sidebar.checkbox(
-        "Merge Identical Words Preview",
+        "同一単語をまとめて表示（Preview）",
         value=current_merge,
         help="Free版では表示プレビューのみです。同一単語を深さに関係なくまとめたグラフ表示を確認できます。Pro版ではこの統合ビューを使った高速な一括編集が可能です。"
     )
@@ -1102,7 +1102,7 @@ if is_free():
         sync_text_areas()
         st.rerun()
 else:
-    merge_by_word = st.sidebar.checkbox("Merge Identical Words (Ignore Depth)", value=False)
+    merge_by_word = st.sidebar.checkbox("同一単語をまとめる（深さを無視）", value=False)
     if st.session_state.project and getattr(st.session_state.project, "merge_by_word_only", False) != merge_by_word:
         st.session_state.project.merge_by_word_only = merge_by_word
         prev_focus = st.session_state.get("focused_line_id")
@@ -1113,9 +1113,9 @@ else:
 
 # Connect Mode: shown to all in Focus Edit Mode or Pro; hidden behind expander for Free outside Focus
 if is_free() and not st.session_state.get("focused_line_id"):
-    with st.sidebar.expander("Advanced Edit Tools", expanded=False):
+    with st.sidebar.expander("高度な編集ツール", expanded=False):
         st.checkbox("Connect Mode", value=False, disabled=True, key="_connect_mode_disabled_display")
-        st.caption("Connect ModeはFocus Edit Mode中にのみ使用できます。選択した2つのノードをつなげる編集機能です。")
+        st.caption("Connect Modeはフォーカス編集中にのみ使用できます。選択した2つのノードをつなげる編集機能です。")
     # Ensure connect_mode is False while out of focus in FREE
     if st.session_state.connect_mode:
         st.session_state.connect_mode = False
@@ -1129,14 +1129,14 @@ else:
         st.rerun()
 
 # Undo
-if st.sidebar.button("Undo", disabled=len(st.session_state.history)==0):
+if st.sidebar.button("元に戻す", disabled=len(st.session_state.history)==0):
     prev_focus = st.session_state.get("focused_line_id")
     undo()
     restore_focus_after_graph_update(prev_focus)
     st.rerun()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Module Toggles Preview")
+st.sidebar.subheader("Module切り替えプレビュー")
 st.sidebar.caption("読み込まれたModuleタグのON/OFF確認用です。Module作成・編集はPro機能です。")
 if st.session_state.project:
     available_modules = get_available_modules(st.session_state.project)
@@ -1151,19 +1151,19 @@ if st.session_state.project:
                     st.session_state.disabled_modules.add(mod_id)
                 st.rerun()
     else:
-        st.sidebar.info("No modules detected.")
+        st.sidebar.info("Moduleは検出されていません。")
 else:
-    st.sidebar.info("Load project first.")
+    st.sidebar.info("先にプロジェクトを開くか、フォルダを読み込んでください。")
 
 st.sidebar.markdown("---")
 # Export/Save
-st.sidebar.subheader("Save & Export")
-st.sidebar.warning("Save your lineage workspace and export scene prompts when ready.")
+st.sidebar.subheader("保存・出力")
+st.sidebar.warning("イラスト集ワークスペースを保存し、必要に応じて生成ソースを出力します。")
 # TODO: Add export modes: combined TXT / overwrite original files / write to separate output directory
 # 「Free版でのExport/Save許可はプレ公開方針。必要なら後で制限する。」
 save_cols = st.sidebar.columns(2)
 with save_cols[0]:
-    if st.button("Save Project", disabled=not bool(st.session_state.project), key="quick_save_project"):
+    if st.button("プロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project"):
         save_project_to_json(st.session_state.project, json_path_default)
         st.session_state.current_project_path = os.path.abspath(json_path_default)
         st.session_state.settings = remember_project(
@@ -1171,14 +1171,14 @@ with save_cols[0]:
             st.session_state.current_project_path,
         )
         save_settings(st.session_state.settings)
-        st.success("Project saved.")
+        st.success("プロジェクトを保存しました。")
 with save_cols[1]:
-    st.button("Export Prompt/Image Set", disabled=True, help="Deferred for Lite; TXT export remains available.")
+    st.button("プロンプト・画像セット出力", disabled=True, help="Liteでは未対応です。TXT出力は利用できます。")
 
-with st.sidebar.expander("Save As", expanded=False):
-    st.caption("Save this lineage workspace as JSON, including candidates and continued lines.")
-    json_path = st.text_input("Project (JSON file)", json_path_default, key="save_project_json_path")
-    if st.button("Save Current Project"):
+with st.sidebar.expander("名前を付けて保存", expanded=False):
+    st.caption("候補イラストや続きの情報を含めて、プロジェクトをJSONとして保存します。")
+    json_path = st.text_input("プロジェクトJSON", json_path_default, key="save_project_json_path")
+    if st.button("現在のプロジェクトを保存"):
         if st.session_state.project:
             save_project_to_json(st.session_state.project, json_path)
             st.session_state.current_project_path = os.path.abspath(json_path)
@@ -1187,44 +1187,44 @@ with st.sidebar.expander("Save As", expanded=False):
                 st.session_state.current_project_path,
             )
             save_settings(st.session_state.settings)
-            st.success("Project saved.")
+            st.success("プロジェクトを保存しました。")
 
-export_path = st.sidebar.text_input("Export Combined TXT Path", st.session_state.settings.get("last_export_path", "prompts.txt"))
-st.sidebar.caption("Export the current story prompts as one TXT. Per-file export is intentionally deferred.")
-if st.sidebar.button("Export TXT"):
+export_path = st.sidebar.text_input("出力先TXT", st.session_state.settings.get("last_export_path", "prompts.txt"))
+st.sidebar.caption("現在のイラストの生成ソース（プロンプト）を1つのTXTに出力します。個別ファイル出力は今後対応予定です。")
+if st.sidebar.button("イラストのソース（プロンプト）を出力"):
     if st.session_state.project:
         export_to_txt(st.session_state.project, export_path, disabled_modules=st.session_state.disabled_modules)
         st.session_state.settings["last_export_path"] = export_path
         save_settings(st.session_state.settings)
-        st.sidebar.success(f"Exported to {export_path}")
+        st.sidebar.success(f"出力しました: {export_path}")
 
-st.sidebar.caption("Lite supports single-image generation from Focus Edit. Batch generation remains a Pro feature.")
+st.sidebar.caption("Liteではフォーカス編集中の単体生成に対応しています。一括生成はPro版機能です。")
 
 if not st.session_state.project:
-    st.title("Create a story workspace")
-    st.info("Start with New Project, Open Last Project, or Open Existing Project in the sidebar.")
+    st.title("イラスト集ワークスペースを作成")
+    st.info("サイドバーから新規プロジェクトを作成するか、保存済みプロジェクトを開いてください。")
     st.markdown("""
-    **Next steps**
-    - Create a story workspace for a new scene chain.
-    - Import existing assets when you already have prompt or image collections.
-    - Start from one generated scene, then use Focus Edit to branch or continue.
+    **次にできること**
+    - 新しいイラスト集プロジェクトを作成する。
+    - 既存のプロンプトや画像がある場合はフォルダから読み込む。
+    - 1枚のイラストを起点に、フォーカス編集で別ルートや続きを作る。
     """)
     st.stop()
 
 if not st.session_state.project.prompt_lines:
-    st.title("Story workspace is ready")
-    st.success("Your workspace is empty and unsaved. Import existing assets or save it as a new lineage project.")
+    st.title("イラスト集ワークスペースを作成しました")
+    st.success("空の未保存プロジェクトです。既存イラスト集を読み込むか、このまま新規プロジェクトとして保存できます。")
     st.markdown("""
-    **Choose the next scene step**
-    - Import a directory of existing prompts and images.
-    - Save the empty workspace if you want a clean project shell first.
-    - After scenes exist, select one in Prompt Lineage to Focus Edit, Branch, Continue, or Generate.
+    **次の操作を選んでください**
+    - 既存のプロンプトと画像をフォルダから読み込む。
+    - 空のプロジェクト枠として先に保存する。
+    - イラストが追加されたら、イラストラインで対象を選び、フォーカス編集・分岐・継続・生成を行う。
     """)
     st.stop()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("Generate Settings")
-st.sidebar.caption("Used by Lite single-candidate generation. Batch and automation loops remain Pro-only.")
+st.sidebar.subheader("生成設定")
+st.sidebar.caption("Liteの単体候補生成で使用します。一括生成と自動ループはPro版機能です。")
 
 def update_comfy_settings():
     st.session_state.settings["comfyui_url"] = st.session_state.comfy_url
@@ -1232,18 +1232,18 @@ def update_comfy_settings():
     save_settings(st.session_state.settings)
 
 st.session_state.comfy_url = st.sidebar.text_input("ComfyUI URL", st.session_state.settings.get("comfyui_url", "127.0.0.1:8188"), on_change=update_comfy_settings)
-st.session_state.comfy_workflow_path = st.sidebar.text_input("Workflow JSON Path", st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json"), on_change=update_comfy_settings)
+st.session_state.comfy_workflow_path = st.sidebar.text_input("workflow JSONパス", st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json"), on_change=update_comfy_settings)
 
 project = st.session_state.project
 
-st.title("PromptGraph Lite Workflow")
-st.caption("Create a story workspace -> import assets -> Focus Edit -> Branch or Continue -> Save and Export.")
+st.title("PromptGraph Lite")
+st.caption("プロジェクト作成 -> 既存イラスト集の読み込み -> フォーカス編集 -> 分岐・継続 -> 保存・出力")
 
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("Graph Preview")
-    st.caption("Inspect lineage and repeated prompt structure. Use Prompt Lineage for Lite editing decisions.")
+    st.subheader("グラフプレビュー")
+    st.caption("生成ソースのつながりや繰り返しを確認し、イラストラインで編集対象を選ぶ参考にします。")
     
     if not hasattr(project, "phrase_freq"):
         project = build_graph(project)
@@ -1303,9 +1303,9 @@ with col1:
     debug_graph = False
     if debug_graph:
         if st.session_state.selected_node_ids:
-            st.caption(f"Displayed nodes: {len(displayed_node_ids)} / Neighborhood Steps: {current_neighborhood_steps}")
+            st.caption(f"表示ノード: {len(displayed_node_ids)} / 近傍ステップ: {current_neighborhood_steps}")
         else:
-            st.caption(f"Displayed nodes: {len(displayed_node_ids)} / Initial Root View")
+            st.caption(f"表示ノード: {len(displayed_node_ids)} / 初期Root表示")
         
     config = Config(width=600,
                     height=360,
@@ -1361,14 +1361,14 @@ with col1:
             st.rerun()
 
     st.markdown("---")
-    st.markdown("**☁️ Prompt Cloud Preview**")
+    st.markdown("**☁️ Prompt Cloudプレビュー**")
     st.caption("頻出語を選び、どのプロンプト行に現れるかを確認します。編集の起点探しに使います。")
-    with st.expander("Advanced Word Cloud Settings", expanded=False):
-        mode = st.radio("WordCloud Mode", ["Global", "Graph"], horizontal=True)
+    with st.expander("Word Cloud詳細設定", expanded=False):
+        mode = st.radio("WordCloud表示", ["Global", "Graph"], horizontal=True)
         global_group_freq = getattr(project, "global_group_freq", {})
         group_options = ["All"] + list(global_group_freq.keys())
-        selected_group = st.selectbox("Group Filter", group_options)
-        analysis_mode = st.radio("Scoring Method", ["Raw Count", "Log Scaled", "TF-IDF Score"], horizontal=True)
+        selected_group = st.selectbox("グループフィルター", group_options)
+        analysis_mode = st.radio("スコア方式", ["Raw Count", "Log Scaled", "TF-IDF Score"], horizontal=True)
     
     
     freq = {}
@@ -1426,7 +1426,7 @@ with col1:
     sorted_words = sorted(freq.keys(), key=lambda w: freq[w], reverse=True)
     
     if not freq:
-        st.info("No data for current filter")
+        st.info("現在のフィルターでは表示できるデータがありません。")
         
     if freq:
         
@@ -1470,7 +1470,7 @@ with col1:
     pills_options = sorted_words[:top_n]
 
     selected_from_pills = st.pills(
-        "Prompt Cloud (Top 30)",
+        "Prompt Cloud 上位30",
         options=pills_options,
         default=[w for w in current_selected_words_visible if w in pills_options],
         format_func=lambda w: f"{w} ({freq[w]})",
@@ -1511,13 +1511,13 @@ with col1:
     
     if st.session_state.selected_node_ids:
         st.markdown("---")
-        st.markdown("**⚡ Focus Edit Helpers**")
-        st.caption("LiteではFocus Edit中の1行編集が基本です。複数行や構造化された一括操作はPro機能として制限されます。")
+        st.markdown("**⚡ フォーカス編集ヘルパー**")
+        st.caption("Liteではフォーカス編集中の1イラスト編集が基本です。複数行や構造化された一括操作はPro版機能として制限されます。")
 
         # Edit Scope Logic
         scope_labels = {
-            "focused": "Focused Line Only",
-            "global": "Global (All Lines)"
+            "focused": "フォーカス中のイラストのみ",
+            "global": "全イラスト"
         }
         scope_lookup = {v: k for k, v in scope_labels.items()}
         
@@ -1533,31 +1533,31 @@ with col1:
             if st.session_state.get("focused_line_id"):
                 target_lines = [st.session_state.focused_line_id]
                 use_global_word_ops = True
-                st.info("⚠️ Operations will apply to the **focused line** based on matching words.")
+                st.info("⚠️ 一致する単語をもとに、**フォーカス中のイラスト**だけへ反映します。")
             else:
                 if st.session_state.edition == "FREE":
-                    st.warning("⚠️ 「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.warning("⚠️ Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     use_global_word_ops = False
                 else:
                     use_global_word_ops = True
-                    st.info("⚠️ Focus mode is not active. Applying globally to **all lines** based on matching words.")
+                    st.info("⚠️ フォーカス編集ではありません。一致する単語をもとに**全イラスト**へ反映します。")
         elif target_scope_key == "global":
             use_global_word_ops = True
-            st.info("⚠️ Operations will apply globally to **all lines** based on matching words, ignoring graph limits.")
+            st.info("⚠️ グラフ表示範囲に関係なく、一致する単語をもとに**全イラスト**へ反映します。")
         else:
             use_global_word_ops = False
-            st.info("⚠️ Operations will apply STRICTLY to nodes visible in the current graph view.")
+            st.info("⚠️ 現在のグラフ表示内にあるノードだけへ反映します。")
 
         match_mode = "exact"
         if use_global_word_ops:
-            match_mode = st.radio("Match Mode:", ["exact", "contains"], horizontal=True)
+            match_mode = st.radio("一致条件:", ["exact", "contains"], horizontal=True)
             
             if len(st.session_state.selected_node_ids) == 1:
                 nid = st.session_state.selected_node_ids[0]
                 if nid in project.nodes:
                     target_word = project.nodes[nid].display
                     match_count = count_matches(st.session_state.project, target_word, target_lines, match_mode)
-                    st.info(f"🔍 **Preview:** Will modify {match_count} occurrences of '{target_word}'.")
+                    st.info(f"🔍 **プレビュー:** '{target_word}' の一致箇所 {match_count} 件を変更します。")
 
         if len(st.session_state.selected_node_ids) == 1:
             st.markdown("### 単一ノード操作")
@@ -1567,9 +1567,9 @@ with col1:
                 col_r1, col_r2 = st.columns([4, 1])
                 with col_r1:
                     new_word = st.text_input("Rename", current_word, key=f"qr_{nid}", label_visibility="collapsed", help="ノード名を変更します。カンマや改行は使用できません。")
-                    st.caption("入力後、Apply Renameを押すと反映されます。")
+                    st.caption("入力後、「名前を反映」を押すと反映されます。")
                 with col_r2:
-                    if st.button("Apply Rename", key=f"qr_btn_{nid}"):
+                    if st.button("名前を反映", key=f"qr_btn_{nid}"):
                         if not new_word.strip() or "," in new_word or "\n" in new_word:
                             st.warning("🚫 ノード名が空、またはカンマや改行が含まれています。有効な文字を入力してください。")
                             st.stop()
@@ -1579,7 +1579,7 @@ with col1:
                                 show_upgrade_dialog("複数行にわたる一括リネームはPro版の機能です。")
                                 st.stop()
                             if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                                st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                                st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                                 st.stop()
                             
                             push_history()
@@ -1594,19 +1594,19 @@ with col1:
                             
 
             st.markdown("---")
-        st.markdown("**Add Node**")
-        add_word = st.text_input("New word to insert", key="qa_add_word")
-        add_pos = st.radio("Position", ["after", "before"], key="qa_add_pos", horizontal=True)
-        if st.button("Insert Node"):
+        st.markdown("**ノードを追加**")
+        add_word = st.text_input("追加する単語", key="qa_add_word")
+        add_pos = st.radio("位置", ["after", "before"], key="qa_add_pos", horizontal=True, format_func=lambda x: "後" if x == "after" else "前")
+        if st.button("ノードを挿入"):
             if add_word:
                 if not validate_node_input(add_word):
                     st.stop()
 
                 if target_scope_key != "focused" and st.session_state.edition == "FREE":
-                    show_upgrade_dialog("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    show_upgrade_dialog("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
                 if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                    st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
 
                 push_history()
@@ -1623,12 +1623,12 @@ with col1:
 
         else:
             st.markdown("### 複数ノード操作")
-        if st.button("🗑️ Delete Node"):
+        if st.button("🗑️ ノードを削除"):
             if target_scope_key != "focused" and st.session_state.edition == "FREE":
-                show_upgrade_dialog("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                show_upgrade_dialog("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                 st.stop()
             if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                 st.stop()
 
             push_history()
@@ -1645,17 +1645,17 @@ with col1:
             st.rerun()
 
             st.markdown("---")
-        st.markdown("**Move Selected Nodes**")
+        st.markdown("**選択ノードを移動**")
         all_node_options = {nid: n.display for nid, n in project.nodes.items() if nid not in st.session_state.selected_node_ids}
         if all_node_options:
-            move_target = st.selectbox("Move relative to:", options=list(all_node_options.keys()), format_func=lambda x: all_node_options[x], key="qa_move_target")
-            move_pos = st.radio("Move Position", ["after", "before"], key="qa_move_pos", horizontal=True)
-            if st.button("Move Nodes"):
+            move_target = st.selectbox("移動先の基準ノード", options=list(all_node_options.keys()), format_func=lambda x: all_node_options[x], key="qa_move_target")
+            move_pos = st.radio("移動位置", ["after", "before"], key="qa_move_pos", horizontal=True, format_func=lambda x: "後" if x == "after" else "前")
+            if st.button("ノードを移動"):
                 if target_scope_key != "focused" and st.session_state.edition == "FREE":
-                    show_upgrade_dialog("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    show_upgrade_dialog("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
                 if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                    st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
 
                 push_history()
@@ -1665,19 +1665,19 @@ with col1:
                 sync_text_areas()
                 st.rerun()
         else:
-            st.info("No other nodes to move to.")
+            st.info("移動先にできる他のノードがありません。")
 
         st.markdown("---")
-        st.markdown("**⚖️ Weight Adjustment**")
+        st.markdown("**⚖️ ウェイト調整**")
         cw1, cw2 = st.columns([3, 1])
         with cw1:
             # We use a static key or no key if it's unique enough. 
             # Since it's only rendered once now, it's fine.
-            new_weight = st.slider("Node Weight", min_value=0.5, max_value=1.5, value=1.0, step=0.1, key="qa_weight_slider")
+            new_weight = st.slider("ノードウェイト", min_value=0.5, max_value=1.5, value=1.0, step=0.1, key="qa_weight_slider")
         with cw2:
             st.write("") # spacer
             st.write("")
-            if st.button("Apply Weight", key="qa_weight_btn"):
+            if st.button("ウェイトを反映", key="qa_weight_btn"):
                 effective_targets = target_lines
                 if is_free():
                     effective_targets = get_free_target_lines_or_block()
@@ -1691,25 +1691,25 @@ with col1:
                 st.rerun()
 
         st.markdown("---")
-        with st.expander("Advanced / Pro Tools", expanded=False):
-            st.markdown("**🎯 Edit Scope**")
+        with st.expander("高度な編集 / Pro機能", expanded=False):
+            st.markdown("**🎯 編集範囲**")
             st.radio(
-                "Apply operations to:", 
-                options=list(scope_labels.values()), 
+                "操作の適用先:",
+                options=list(scope_labels.values()),
                 index=list(scope_labels.keys()).index(default_scope_key),
-                horizontal=True, 
+                horizontal=True,
                 key="qa_scope_radio"
             )
 
             st.markdown("---")
-            mod_name = st.text_input("Module Name", key="qa_mod_name")
-            if st.button("🧩 Convert to Module"):
+            mod_name = st.text_input("Module名", key="qa_mod_name")
+            if st.button("🧩 Moduleに変換"):
                 if st.session_state.edition == "FREE":
-                    show_upgrade_dialog("Module authoring (converting nodes to reusable modules) is available in the Pro edition.")
+                    show_upgrade_dialog("Module作成（ノードを再利用可能なModuleに変換）はPro版機能です。")
                     st.stop()
 
                 if not mod_name.strip():
-                    st.warning("Module name is required")
+                    st.warning("Module名を入力してください。")
                     st.stop()
 
                 selected_words = {
@@ -1751,12 +1751,12 @@ with col1:
 
 
             st.markdown("---")
-            if st.button("📋 Duplicate Node"):
+            if st.button("📋 ノードを複製"):
                 if target_scope_key != "focused" and st.session_state.edition == "FREE":
-                    show_upgrade_dialog("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    show_upgrade_dialog("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
                 if target_scope_key == "focused" and not st.session_state.get("focused_line_id") and st.session_state.edition == "FREE":
-                    st.error("「Free版ではこの操作にFocus Edit Modeが必要です。Linesタブで対象行を選び、Focus Edit を押してから再試行してください。」")
+                    st.error("Free版ではこの操作にフォーカス編集が必要です。イラストラインで対象を選び、フォーカス編集に入ってから再試行してください。")
                     st.stop()
 
                 push_history()
@@ -1773,16 +1773,16 @@ with col1:
                 st.rerun()
 
             st.markdown("---")
-            if st.button("❌ Clear Selection"):
+            if st.button("❌ 選択を解除"):
                 st.session_state.selected_node_ids = []
                 st.rerun()
 
 
             st.markdown("---")
-            st.markdown("**🌟 Favorites (Snippets)**")
-            fav_name = st.text_input("Name for current selection", "My Favorite Snippet")
-            if st.button("Save Selection as Favorite"):
-                if not require_pro("Saving reusable snippets and structural insertion are Pro features."):
+            st.markdown("**🌟 お気に入り（スニペット）**")
+            fav_name = st.text_input("現在の選択に付ける名前", "お気に入りスニペット")
+            if st.button("選択をお気に入りに保存"):
+                if not require_pro("再利用スニペットの保存と構造挿入はPro版機能です。"):
                     st.stop()
 
                 nodes = [project.nodes[nid] for nid in st.session_state.selected_node_ids if nid in project.nodes]
@@ -1792,20 +1792,20 @@ with col1:
                     st.session_state.settings["favorite_subgraphs"] = []
                 st.session_state.settings["favorite_subgraphs"].append({"name": fav_name, "words": words})
                 save_settings(st.session_state.settings)
-                st.success(f"Saved: {fav_name} ({len(words)} words)")
+                st.success(f"保存しました: {fav_name}（{len(words)}語）")
 
             favs = st.session_state.settings.get("favorite_subgraphs", [])
             if favs:
                 st.markdown("---")
-                fav_options = {i: f"{f['name']} ({len(f['words'])} words)" for i, f in enumerate(favs)}
-                sel_fav_idx = st.selectbox("Select Favorite", options=list(fav_options.keys()), format_func=lambda x: fav_options[x])
+                fav_options = {i: f"{f['name']}（{len(f['words'])}語）" for i, f in enumerate(favs)}
+                sel_fav_idx = st.selectbox("お気に入りを選択", options=list(fav_options.keys()), format_func=lambda x: fav_options[x])
                 sel_fav = favs[sel_fav_idx]
                 st.caption(", ".join(sel_fav["words"]))
 
                 fc1, fc2, fc3 = st.columns(3)
                 with fc1:
-                    if st.button("➕ Insert After"):
-                        if not require_pro("Reusable snippets and structural insertion are Pro features."):
+                    if st.button("➕ 後ろに挿入"):
+                        if not require_pro("再利用スニペットと構造挿入はPro版機能です。"):
                             st.stop()
 
                         push_history()
@@ -1815,8 +1815,8 @@ with col1:
                         sync_text_areas()
                         st.rerun()
                 with fc2:
-                    if st.button("🔄 Replace"):
-                        if not require_pro("Reusable snippets and structural insertion are Pro features."):
+                    if st.button("🔄 置換"):
+                        if not require_pro("再利用スニペットと構造挿入はPro版機能です。"):
                             st.stop()
 
                         push_history()
@@ -1827,7 +1827,7 @@ with col1:
                         sync_text_areas()
                         st.rerun()
                 with fc3:
-                    if st.button("🗑️ Delete Fav"):
+                    if st.button("🗑️ お気に入りを削除"):
                         st.session_state.settings["favorite_subgraphs"].pop(sel_fav_idx)
                         save_settings(st.session_state.settings)
                         st.rerun()
@@ -1835,12 +1835,12 @@ with col1:
 
 
 with col2:
-    tab1, tab2 = st.tabs(["Prompt Lineage", "Node Operations"])
+    tab1, tab2 = st.tabs(["イラストライン", "ノード操作"])
 
     with tab1:
-        st.subheader("Prompt Lineage")
-        st.caption("読み込んだプロンプトを行単位の系譜として確認します。Branchで既存行から派生案を作り、Focus Editで編集します。")
-        st.caption("Use ↑ / ↓ on each line to adjust story order. Reorder is single-line and Lite-safe.")
+        st.subheader("イラストライン")
+        st.caption("読み込んだイラストと生成ソースを流れとして確認します。別ルートを作る場合は対象を選び、フォーカス編集で調整します。")
+        st.caption("各イラストの ↑ / ↓ で順番を調整できます。並べ替えは1件ずつ行うLite-safeな操作です。")
         if st.session_state.get("branch_feedback"):
             st.success(st.session_state.branch_feedback)
             st.session_state.branch_feedback = ""
@@ -1849,20 +1849,20 @@ with col2:
         
         if st.session_state.selected_node_ids:
             words = [project.nodes[nid].display for nid in st.session_state.selected_node_ids if nid in project.nodes]
-            st.info(f"Filtering by node(s): **{', '.join(words)}**")
+            st.info(f"ノードで絞り込み中: **{', '.join(words)}**")
             # 選択中のすべてのノードを含むラインのみ表示するか、いずれかを含むラインを表示するか。
             # 今回はいずれかを含む(OR条件)にする
             display_lines = [l for l in display_lines if any(nid in l.node_path for nid in st.session_state.selected_node_ids)]
         else:
-            st.write(f"Total Lines: {len(display_lines)}")
+            st.write(f"有効なイラスト: {len(display_lines)}")
         
         if "selected_lines" not in st.session_state:
             st.session_state.selected_lines = {}
             
         c_del, c_dup, c_merge = st.columns([1, 1, 1])
         with c_del:
-            if st.button("🗑️ Delete Selected Lines"):
-                if not require_pro("Batch line operations are available in Pro."):
+            if st.button("🗑️ 選択したイラストを削除"):
+                if not require_pro("複数イラストの一括操作はPro版機能です。"):
                     st.stop()
                 
                 push_history()
@@ -1879,8 +1879,8 @@ with col2:
                 st.session_state.selected_lines = {}
                 st.rerun()
         with c_dup:
-            if st.button("📋 Batch Duplicate Selected Lines (Pro)"):
-                if not require_pro("Batch line operations are available in Pro."):
+            if st.button("📋 選択イラストを一括複製（Pro）"):
+                if not require_pro("複数イラストの一括操作はPro版機能です。"):
                     st.stop()
                 
                 push_history()
@@ -1903,8 +1903,8 @@ with col2:
                 st.session_state.selected_lines = {}
                 st.rerun()
         with c_merge:
-            if st.button("✨ Merge All Duplicates"):
-                if not require_pro("Batch line operations are available in Pro."):
+            if st.button("✨ 重複語を一括整理"):
+                if not require_pro("複数イラストの一括操作はPro版機能です。"):
                     st.stop()
                 
                 push_history()
@@ -1912,7 +1912,7 @@ with col2:
                 st.session_state.project = merge_duplicates_all_lines(st.session_state.project)
                 restore_focus_after_graph_update(prev_focus)
                 st.rerun()
-        st.caption("Selected-line batch operations are shown as Pro potential and remain restricted in Lite.")
+        st.caption("選択イラストの一括操作はPro版候補として表示しており、Liteでは制限されています。")
 
         st.write("---")
         
@@ -1926,28 +1926,28 @@ with col2:
                 st.session_state.focused_line_id = None
                 st.rerun()
                 
-            st.markdown(f"### 🎯 Focus Edit / Branch Story: `{target_line.original_file_name}`")
-            st.caption("この行だけを編集し、Create Branchで分岐し、Continue Storyで次のシーンへ進めます。")
+            st.markdown(f"### 🎯 フォーカス編集 / 別ルート作成: `{target_line.original_file_name}`")
+            st.caption("このイラストの生成ソースだけを編集し、別ルートやこのルートの次のイラストを作成します。")
             focus_visible_line_ids = [line.id for line in project.prompt_lines if not line.deleted]
             focus_visible_index = focus_visible_line_ids.index(target_line.id)
             c_back, c_up, c_down = st.columns([2, 1, 1])
             with c_back:
-                if st.button("🔙 Back to All Lines"):
+                if st.button("🔙 イラストラインに戻る"):
                     st.session_state.focused_line_id = None
                     st.rerun()
             with c_up:
-                if st.button("↑", key=f"focus_move_up_{target_line.id}", disabled=focus_visible_index == 0, help="Move this focused line earlier"):
+                if st.button("↑", key=f"focus_move_up_{target_line.id}", disabled=focus_visible_index == 0, help="このイラストを前へ移動"):
                     if move_line(target_line.id, focus_visible_line_ids, "up"):
                         st.rerun()
             with c_down:
-                if st.button("↓", key=f"focus_move_down_{target_line.id}", disabled=focus_visible_index == len(focus_visible_line_ids) - 1, help="Move this focused line later"):
+                if st.button("↓", key=f"focus_move_down_{target_line.id}", disabled=focus_visible_index == len(focus_visible_line_ids) - 1, help="このイラストを後ろへ移動"):
                     if move_line(target_line.id, focus_visible_line_ids, "down"):
                         st.rerun()
                 
             if st.session_state.edition == "FREE":
                 st.markdown("---")
-                st.markdown("### 📊 Export / Generate Preview (Lite)")
-                st.info("このプレビューは、現在の行プロンプトに対してModule Toggleなどを反映した、実際にExportされるプロンプトを表示します。通常のノード編集は保存時点でCurrent Line Promptに反映されるため、差分が小さい場合があります。")
+                st.markdown("### 📊 生成ソース出力プレビュー（Lite）")
+                st.info("このプレビューは、現在の生成ソースにModule切り替えなどを反映した、実際に出力・生成へ使われるプロンプトを表示します。")
                 
                 # Get current generated text
                 from core.operations import get_active_tokens
@@ -1957,42 +1957,42 @@ with col2:
                 
                 col_diff1, col_diff2 = st.columns(2)
                 with col_diff1:
-                    st.caption("Display Prompt")
+                    st.caption("表示用プロンプト")
                     st.code(", ".join(get_display_tokens_from_text(target_line.current_text)), language="text")
                 with col_diff2:
-                    st.caption("Active Export Prompt")
+                    st.caption("出力される生成ソース")
                     st.code(current_generated_text, language="text")
                 
                 # Structural Stats
                 stats = get_structural_stats(target_line.current_text, current_generated_text)
                 
                 c_stat1, c_stat2, c_stat3 = st.columns(3)
-                c_stat1.metric("Token Delta", f"{stats['token_delta']:+d}")
-                c_stat2.metric("Active Modules", stats['mod_count'])
-                c_stat3.metric("Change Ratio", f"{stats['change_ratio']:.1%}")
+                c_stat1.metric("トークン差分", f"{stats['token_delta']:+d}")
+                c_stat2.metric("有効Module", stats['mod_count'])
+                c_stat3.metric("変化率", f"{stats['change_ratio']:.1%}")
                 
-                st.markdown("**Active Prompt Hints:**")
+                st.markdown("**生成ソースのヒント:**")
                 with st.container(border=True):
                     hints = []
                     if stats['mod_count'] > 0:
-                        hints.append("- 🧩 **Module Detection**: Possible better modular control and tag reuse.")
+                        hints.append("- 🧩 **Module検出**: Moduleによる制御やタグ再利用が含まれています。")
                     if abs(stats['token_delta']) > 5:
-                        hints.append("- 📏 **Length Shift**: Possible significant prompt emphasis shift.")
+                        hints.append("- 📏 **長さの変化**: プロンプトの強調バランスが変わる可能性があります。")
                     if stats['has_weights']:
-                        hints.append("- ⚖️ **Weighting**: Likely strength/priority changes in the output.")
+                        hints.append("- ⚖️ **ウェイト**: 出力結果の強さや優先度が変わる可能性があります。")
                     if stats['change_ratio'] > 0.4:
-                        hints.append("- 🌊 **High Variation**: Transformation may significantly alter the original intent.")
+                        hints.append("- 🌊 **変化大**: 元の意図から大きく変わる可能性があります。")
                     
                     if hints:
                         for h in hints: st.markdown(h)
                     else:
-                        st.info("Minor structural changes detected.")
+                        st.info("構造上の変化は小さめです。")
                 
-                st.text_area("Final Modified Prompt (for manual copy)", current_generated_text, height=100)
-                st.button("📋 Copy to Clipboard (Auto)", on_click=lambda: components.html(f"<script>navigator.clipboard.writeText('{current_generated_text.replace(chr(39), chr(92)+chr(39))}');</script>", height=0))
-                st.caption("Tip: Pro edition allows direct sync without copy-pasting.")
+                st.text_area("最終生成ソース（手動コピー用）", current_generated_text, height=100)
+                st.button("📋 クリップボードへコピー", on_click=lambda: components.html(f"<script>navigator.clipboard.writeText('{current_generated_text.replace(chr(39), chr(92)+chr(39))}');</script>", height=0))
+                st.caption("Pro版ではコピー＆ペーストなしの直接同期に対応予定です。")
 
-            st.markdown("**Preview (Click graph nodes to highlight):**")
+            st.markdown("**プレビュー（グラフノードを選択すると強調表示）:**")
             
             highlight_words = [project.nodes[nid].display.lower() for nid in st.session_state.selected_node_ids if nid in project.nodes]
             
@@ -2009,15 +2009,15 @@ with col2:
             preview_html = preview_html.strip(", ")
             st.markdown(preview_html, unsafe_allow_html=True)
             
-            with st.expander("Raw Prompt with Module Tags (Debug)", expanded=False):
+            with st.expander("Moduleタグ付き生成ソース（Debug）", expanded=False):
                 st.code(target_line.current_text, language="text")
             
             st.markdown("---")
-            new_text = st.text_area("Edit Prompt", target_line.current_text, key=f"focus_text_{target_line.id}", height=150)
+            new_text = st.text_area("生成ソースを編集", target_line.current_text, key=f"focus_text_{target_line.id}", height=150)
             c1, c2, c3 = st.columns([1, 1, 1])
             with c1:
                 if new_text != target_line.current_text:
-                    if st.button("💾 Save Changes", type="primary"):
+                    if st.button("💾 変更を保存", type="primary"):
                         if st.session_state.edition == "FREE":
                             old_structure = extract_module_structure_from_text(target_line.current_text)
                             new_structure = extract_module_structure_from_text(new_text)
@@ -2027,46 +2027,46 @@ with col2:
                         update_line_text(target_line.id, new_text)
                         st.rerun()
             with c2:
-                if st.button("🌱 Create Branch from this Line", type="primary"):
+                if st.button("🌱 別ルートのイラストを作る", type="primary"):
                     new_line_id = duplicate_line(target_line.id, focus_new_branch=True)
                     if new_line_id:
-                        st.session_state.branch_feedback = "Created a new branch from the focused line."
+                        st.session_state.branch_feedback = "フォーカス中のイラストから別ルートを作成しました。"
                     st.rerun()
             with c3:
-                if st.button("✨ Merge Duplicate Words"):
+                if st.button("✨ 重複語を整理"):
                     push_history()
                     prev_focus = st.session_state.get("focused_line_id")
                     st.session_state.project = merge_duplicates_in_line(st.session_state.project, target_line.id)
                     restore_focus_after_graph_update(prev_focus)
                     st.rerun()
 
-            with st.expander("Imported / Generated Image Preview", expanded=False):
+            with st.expander("読み込み画像 / 生成結果プレビュー", expanded=False):
                 img_c1, img_c2 = st.columns(2)
                 with img_c1:
-                    st.markdown("**Reference Image**")
+                    st.markdown("**元のイラスト**")
                     if target_line.image_path and os.path.exists(target_line.image_path):
                         st.image(target_line.image_path, width="stretch")
                     else:
-                        st.info("No reference image.")
+                        st.info("元のイラストはありません。")
                 with img_c2:
-                    st.markdown("**After Image**")
+                    st.markdown("**採用イラスト**")
                     if getattr(target_line, "generated_image_path", None) and os.path.exists(target_line.generated_image_path):
                         st.image(target_line.generated_image_path, width="stretch")
                     else:
-                        st.info("No after image selected yet.")
+                        st.info("採用イラストはまだ選択されていません。")
 
-            st.markdown("#### Continue Story")
-            st.caption("Create the next story scene from this result.")
-            if st.button("Continue Story", type="primary"):
+            st.markdown("#### このルートの次のイラスト")
+            st.caption("現在の結果を起点に、このルートの次のイラストを作成します。")
+            if st.button("このルートの次のイラストを作る", type="primary"):
                 new_line_id = continue_story_from_line(target_line.id)
                 if new_line_id:
-                    st.session_state.branch_feedback = "Created the next story line and moved Focus Edit to it."
+                    st.session_state.branch_feedback = "次のイラストを作成し、フォーカス編集を移動しました。"
                 st.rerun()
 
-            st.markdown("#### Generate / Compare")
+            st.markdown("#### 生成・比較")
             render_lite_comfy_workflow_debug_preview(target_line)
-            st.caption("Lite runs one focused-line generation at a time. Batch generation and scene pools stay Pro-only.")
-            if st.button("🎨 Generate with ComfyUI", type="primary"):
+            st.caption("Liteではフォーカス中の1イラストずつ生成します。一括生成や大規模な生成プールはPro版機能です。")
+            if st.button("🎨 ComfyUIで候補イラストを生成", type="primary"):
                 try:
                     workflow_json = build_lite_generation_workflow(target_line)
                     output_dir = os.path.join(st.session_state.project.source_directory or ".", "generated")
@@ -2084,7 +2084,7 @@ with col2:
                         if "value" in status:
                             progress_bar.progress(status["value"])
                         if "text" in status:
-                            status_text.markdown(f"**Status:** {status['text']}")
+                            status_text.markdown(f"**状態:** {status['text']}")
                         if status.get("type") == "done":
                             gen_path = status.get("path")
 
@@ -2096,10 +2096,10 @@ with col2:
                         )
                         target_line.generated_image_path = gen_path
                         target_line.selected_candidate_path = gen_path
-                        st.success("Generated one candidate image for this prompt line.")
+                        st.success("候補イラストを1枚生成しました。")
                         st.rerun()
                 except Exception as e:
-                    st.error(f"Lite single-image generation failed: {e}")
+                    st.error(f"Liteの単体生成に失敗しました: {e}")
 
             candidates = list(_get_line_generated_candidates(target_line))
             existing_candidates = [
@@ -2113,46 +2113,46 @@ with col2:
                 if _candidate_path(candidate) and not os.path.exists(_candidate_path(candidate))
             ]
             if missing_candidates:
-                st.caption(f"{len(missing_candidates)} saved candidate path(s) are missing on disk.")
+                st.caption(f"保存済み候補パスのうち {len(missing_candidates)} 件が見つかりません。")
 
             if existing_candidates:
-                with st.expander("Candidate Images", expanded=True):
+                with st.expander("候補イラスト", expanded=True):
                     for candidate_index, candidate in enumerate(reversed(existing_candidates)):
                         candidate_path = _candidate_path(candidate)
                         st.image(candidate_path, width="stretch")
                         st.caption(candidate_path)
                         ca, cr = st.columns(2)
                         with ca:
-                            if st.button("Set as After", key=f"after_{target_line.id}_{candidate_index}"):
+                            if st.button("採用イラストにする", key=f"after_{target_line.id}_{candidate_index}"):
                                 set_candidate_as_after(target_line, candidate_path)
-                                st.success("Candidate set as After image.")
+                                st.success("採用イラストに設定しました。")
                                 st.rerun()
                         with cr:
-                            if st.button("Set as Reference", key=f"ref_{target_line.id}_{candidate_index}"):
+                            if st.button("元のイラストにする", key=f"ref_{target_line.id}_{candidate_index}"):
                                 set_candidate_as_reference(target_line, candidate_path)
-                                st.success("Candidate set as Reference image.")
+                                st.success("元のイラストに設定しました。")
                                 st.rerun()
             else:
-                st.info("No candidate images yet. Generate one candidate to start the next lineage step.")
+                st.info("候補イラストはまだありません。次のイラスト作成に進む前に候補を生成できます。")
                 
         else:
             visible_line_ids = [line.id for line in display_lines]
             for visible_index, l in enumerate(display_lines):
-                title = f"[{l.original_file_name}] Line {l.original_index}"
+                title = f"[{l.original_file_name}] イラスト {l.original_index}"
                 if l.edited:
-                    title += " (Edited)"
+                    title += "（編集済み）"
                 if getattr(l, "continued_from", None):
-                    title += " (Continued)"
+                    title += "（続き）"
                 elif l.duplicated_from:
-                    title += " (Branch)"
+                    title += "（別ルート）"
                     
                 col_chk, col_exp = st.columns([0.05, 0.95])
                 with col_chk:
-                    st.session_state.selected_lines[l.id] = st.checkbox("Select", value=st.session_state.selected_lines.get(l.id, False), key=f"chk_{l.id}", label_visibility="collapsed")
+                    st.session_state.selected_lines[l.id] = st.checkbox("選択", value=st.session_state.selected_lines.get(l.id, False), key=f"chk_{l.id}", label_visibility="collapsed")
                 
                 with col_exp:
                     with st.expander(title):
-                        if st.button("🎯 Focus Edit / Branch", key=f"focus_btn_{l.id}"):
+                        if st.button("🎯 フォーカス編集 / 別ルート", key=f"focus_btn_{l.id}"):
                             st.session_state.focused_line_id = l.id
                             st.rerun()
                             
@@ -2161,40 +2161,40 @@ with col2:
                             with c_img:
                                 st.image(l.image_path, width="stretch")
                             with c_txt:
-                                new_text = st.text_area("Prompt Text", l.current_text, key=f"text_{l.id}", label_visibility="collapsed")
+                                new_text = st.text_area("生成ソース", l.current_text, key=f"text_{l.id}", label_visibility="collapsed")
                         else:
-                            new_text = st.text_area("Prompt Text", l.current_text, key=f"text_{l.id}")
+                            new_text = st.text_area("生成ソース", l.current_text, key=f"text_{l.id}")
                             
                         if new_text != l.current_text:
-                            if st.button("Save Changes", key=f"save_{l.id}"):
+                            if st.button("変更を保存", key=f"save_{l.id}"):
                                 if is_free() and not st.session_state.get("focused_line_id"):
-                                    st.error("「Free版では編集にFocus Edit Modeが必要です。Focus Edit を押して Focus Edit Modeに入ってから編集してください。」")
+                                    st.error("Free版では編集にフォーカス編集が必要です。フォーカス編集に入ってから編集してください。")
                                     st.stop()
                                 update_line_text(l.id, new_text)
                                 st.rerun()
                                 
                         c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-                        if c1.button("↑", key=f"move_up_{l.id}", disabled=visible_index == 0, help="Move this prompt line earlier"):
+                        if c1.button("↑", key=f"move_up_{l.id}", disabled=visible_index == 0, help="このイラストを前へ移動"):
                             if move_line(l.id, visible_line_ids, "up"):
                                 st.rerun()
-                        if c2.button("↓", key=f"move_down_{l.id}", disabled=visible_index == len(display_lines) - 1, help="Move this prompt line later"):
+                        if c2.button("↓", key=f"move_down_{l.id}", disabled=visible_index == len(display_lines) - 1, help="このイラストを後ろへ移動"):
                             if move_line(l.id, visible_line_ids, "down"):
                                 st.rerun()
-                        if c3.button("Branch", key=f"dup_{l.id}", help="Create a branch immediately after this prompt line"):
+                        if c3.button("別ルート", key=f"dup_{l.id}", help="このイラストの直後に別ルートを作成します"):
                             new_line_id = duplicate_line(l.id)
                             if new_line_id:
-                                st.session_state.branch_feedback = "Created a branch directly after the source line."
+                                st.session_state.branch_feedback = "元のイラストの直後に別ルートを作成しました。"
                             st.rerun()
-                        if c4.button("Delete", key=f"del_{l.id}"):
+                        if c4.button("削除", key=f"del_{l.id}"):
                             if is_free() and not st.session_state.get("focused_line_id"):
-                                st.error("「Free版では編集にFocus Edit Modeが必要です。Focus Edit を押して Focus Edit Modeに入ってから編集してください。」")
+                                st.error("Free版では編集にフォーカス編集が必要です。フォーカス編集に入ってから編集してください。")
                                 st.stop()
                             delete_line(l.id)
                             st.rerun()
 
     with tab2:
         if st.session_state.connect_mode:
-            st.subheader("Connect Mode Active")
+            st.subheader("Connect Mode 有効")
             st.info("グラフ上でノードを2つ順番にクリックして接続します。")
             if len(st.session_state.connect_nodes) == 0:
                 st.write("1. 接続元のノードを選択してください...")
@@ -2204,7 +2204,7 @@ with col2:
                 st.write(f"1. 接続元: **{word}**")
                 st.write("2. 接続先のノードを選択してください...")
         else:
-            st.subheader("Node Operations")
+            st.subheader("ノード操作")
             if not st.session_state.selected_node_ids:
                 st.info("グラフ上でノードを選択してください。(Shift/Ctrlクリックで複数選択可能ですが、環境により動作しない場合は一つずつ選択してください)")
             else:
@@ -2218,9 +2218,9 @@ with col2:
                 if len(st.session_state.selected_node_ids) == 1:
                     nid = st.session_state.selected_node_ids[0]
                     
-                    add_word = st.text_input("New Node Word")
-                    pos = st.radio("Position", ["Before", "After"])
-                    if st.button("Add Node"):
+                    add_word = st.text_input("追加するノード単語")
+                    pos = st.radio("位置", ["Before", "After"], format_func=lambda x: "前" if x == "Before" else "後")
+                    if st.button("ノードを追加"):
                         if add_word:
                             if not validate_node_input(add_word):
                                 st.stop()
@@ -2239,12 +2239,12 @@ with col2:
                         
                     st.markdown("---")
                     
-                    st.write("**Link to Existing Node**")
+                    st.write("**既存ノードをリンク**")
                     existing_options = {n.id: n.display for n in project.nodes.values()}
                     if existing_options:
-                        link_target_id = st.selectbox("Select Node to Link", options=[""] + list(existing_options.keys()), format_func=lambda x: existing_options[x] if x else "--- Select Node ---")
-                        link_pos = st.radio("Link Position", ["Before", "After"], key="link_pos")
-                        if st.button("Link Node") and link_target_id:
+                        link_target_id = st.selectbox("リンクするノードを選択", options=[""] + list(existing_options.keys()), format_func=lambda x: existing_options[x] if x else "--- ノードを選択 ---")
+                        link_pos = st.radio("リンク位置", ["Before", "After"], key="link_pos", format_func=lambda x: "前" if x == "Before" else "後")
+                        if st.button("ノードをリンク") and link_target_id:
                             effective_targets = None
                             if is_free():
                                 effective_targets = get_free_target_lines_or_block()
@@ -2262,9 +2262,9 @@ with col2:
                 
                 target_options = {n.id: n.display for n in project.nodes.values() if n.id not in st.session_state.selected_node_ids}
                 if target_options:
-                    target_id = st.selectbox("Move Target Node", options=list(target_options.keys()), format_func=lambda x: target_options[x])
-                    move_pos = st.radio("Move Position", ["Before", "After"], key="move_pos")
-                    if st.button("Move Selected Node(s)"):
+                    target_id = st.selectbox("移動先ノード", options=list(target_options.keys()), format_func=lambda x: target_options[x])
+                    move_pos = st.radio("移動位置", ["Before", "After"], key="move_pos", format_func=lambda x: "前" if x == "Before" else "後")
+                    if st.button("選択ノードを移動"):
                         effective_targets = None
                         if is_free():
                             effective_targets = get_free_target_lines_or_block()
