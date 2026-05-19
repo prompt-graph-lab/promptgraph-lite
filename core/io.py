@@ -1,6 +1,7 @@
 import os
 import glob
 import json
+import shutil
 from dataclasses import asdict
 import dataclasses
 from datetime import datetime, timezone
@@ -730,6 +731,89 @@ def export_to_txt(project: Project, output_path: str, include_comments: bool = F
                 
             active = get_active_tokens(line, disabled_modules)
             f.write(f"{', '.join(active)}\n")
+
+# Prompt/image set export helpers
+def _safe_export_stem(file_name: str) -> str:
+    stem = os.path.splitext(os.path.basename(file_name or "illustration"))[0]
+    safe_stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in stem).strip("_")
+    return safe_stem or "illustration"
+
+def _unique_export_dir(output_dir: str) -> str:
+    output_dir = os.path.abspath(os.path.expanduser(output_dir))
+    if not os.path.exists(output_dir) or not os.listdir(output_dir):
+        return output_dir
+
+    suffix = 1
+    while True:
+        candidate = f"{output_dir}_{suffix}"
+        if not os.path.exists(candidate):
+            return candidate
+        suffix += 1
+
+def _resolve_export_image_path(project: Project, image_path: str) -> str:
+    if not image_path:
+        return ""
+    if os.path.exists(image_path):
+        return os.path.abspath(image_path)
+    if os.path.isabs(image_path):
+        return image_path
+    source_directory = getattr(project, "source_directory", "") or ""
+    if source_directory:
+        return os.path.abspath(os.path.join(source_directory, image_path))
+    return image_path
+
+def _selected_export_image(project: Project, line: PromptLine) -> tuple[str, str]:
+    choices = (
+        ("candidate", getattr(line, "selected_candidate_path", None)),
+        ("after", getattr(line, "generated_image_path", None)),
+        ("reference", getattr(line, "image_path", None)),
+    )
+    for image_kind, image_path in choices:
+        resolved_path = _resolve_export_image_path(project, image_path)
+        if resolved_path and os.path.exists(resolved_path):
+            return image_kind, resolved_path
+    return "", ""
+
+def export_prompt_image_set(project: Project, output_dir: str, disabled_modules: set = None) -> dict:
+    if disabled_modules is None:
+        disabled_modules = set()
+
+    from core.operations import get_active_tokens
+
+    export_dir = _unique_export_dir(output_dir)
+    os.makedirs(export_dir, exist_ok=True)
+    prompts_path = os.path.join(export_dir, "prompts.txt")
+
+    copied_images = []
+    missing_images = []
+    valid_lines = [line for line in project.prompt_lines if not line.deleted]
+
+    with open(prompts_path, "w", encoding="utf-8") as prompt_file:
+        for index, line in enumerate(valid_lines, start=1):
+            active = get_active_tokens(line, disabled_modules)
+            prompt_file.write(f"{', '.join(active)}\n")
+
+            image_kind, image_path = _selected_export_image(project, line)
+            if not image_path:
+                missing_images.append(getattr(line, "id", f"line_{index}"))
+                continue
+
+            extension = os.path.splitext(image_path)[1] or ".png"
+            file_stem = _safe_export_stem(getattr(line, "original_file_name", "") or getattr(line, "id", "illustration"))
+            output_image_path = os.path.join(export_dir, f"{index:04d}_{image_kind}_{file_stem}{extension}")
+            shutil.copy2(image_path, output_image_path)
+            copied_images.append(output_image_path)
+
+    return {
+        "output_dir": export_dir,
+        "prompts_path": prompts_path,
+        "prompt_count": len(valid_lines),
+        "image_count": len(copied_images),
+        "missing_image_count": len(missing_images),
+        "copied_images": copied_images,
+        "missing_line_ids": missing_images,
+        "used_fallback_directory": os.path.abspath(os.path.expanduser(output_dir)) != export_dir,
+    }
 
 # JSONのエンコード/デコードでSetなどを処理するカスタムEncoder
 class SetEncoder(json.JSONEncoder):
