@@ -2013,8 +2013,8 @@ with col2:
                 st.session_state.focused_line_id = None
                 st.rerun()
                 
-            st.markdown(f"### 🎯 フォーカス編集 / 別ルート作成: `{target_line.original_file_name}`")
-            st.caption("このイラストの生成ソースだけを編集し、別ルートやこのルートの次のイラストを作成します。")
+            st.markdown(f"### 🎯 フォーカス編集: `{target_line.original_file_name}`")
+            st.caption("フォーカス中の1枚を確認し、生成ソース（プロンプト）の編集、別ルート作成、続きの作成、候補生成を行います。")
             focus_visible_line_ids = [line.id for line in project.prompt_lines if not line.deleted]
             focus_visible_index = focus_visible_line_ids.index(target_line.id)
             c_back, c_up, c_down = st.columns([2, 1, 1])
@@ -2030,59 +2030,28 @@ with col2:
                 if st.button("↓", key=f"focus_move_down_{target_line.id}", disabled=focus_visible_index == len(focus_visible_line_ids) - 1, help="このイラストを後ろへ移動"):
                     if move_line(target_line.id, focus_visible_line_ids, "down"):
                         st.rerun()
-                
-            if st.session_state.edition == "FREE":
-                st.markdown("---")
-                st.markdown("### 📊 生成ソース出力プレビュー（Lite）")
-                st.info("このプレビューは、現在の生成ソースにModule切り替えなどを反映した、実際に出力・生成へ使われるプロンプトを表示します。")
-                
-                # Get current generated text
-                from core.operations import get_active_tokens
-                fallback_prompt = st.session_state.settings.get("fallback_prompt", "(masterpiece:1.0)")
-                current_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
-                current_generated_text = ", ".join(current_tokens)
-                
-                col_diff1, col_diff2 = st.columns(2)
-                with col_diff1:
-                    st.caption("表示用プロンプト")
-                    st.code(", ".join(get_display_tokens_from_text(target_line.current_text)), language="text")
-                with col_diff2:
-                    st.caption("出力される生成ソース")
-                    st.code(current_generated_text, language="text")
-                
-                # Structural Stats
-                stats = get_structural_stats(target_line.current_text, current_generated_text)
-                
-                c_stat1, c_stat2, c_stat3 = st.columns(3)
-                c_stat1.metric("トークン差分", f"{stats['token_delta']:+d}")
-                c_stat2.metric("有効Module", stats['mod_count'])
-                c_stat3.metric("変化率", f"{stats['change_ratio']:.1%}")
-                
-                st.markdown("**生成ソースのヒント:**")
-                with st.container(border=True):
-                    hints = []
-                    if stats['mod_count'] > 0:
-                        hints.append("- 🧩 **Module検出**: Moduleによる制御やタグ再利用が含まれています。")
-                    if abs(stats['token_delta']) > 5:
-                        hints.append("- 📏 **長さの変化**: プロンプトの強調バランスが変わる可能性があります。")
-                    if stats['has_weights']:
-                        hints.append("- ⚖️ **ウェイト**: 出力結果の強さや優先度が変わる可能性があります。")
-                    if stats['change_ratio'] > 0.4:
-                        hints.append("- 🌊 **変化大**: 元の意図から大きく変わる可能性があります。")
-                    
-                    if hints:
-                        for h in hints: st.markdown(h)
-                    else:
-                        st.info("構造上の変化は小さめです。")
-                
-                st.text_area("最終生成ソース（手動コピー用）", current_generated_text, height=100)
-                st.button("📋 クリップボードへコピー", on_click=lambda: components.html(f"<script>navigator.clipboard.writeText('{current_generated_text.replace(chr(39), chr(92)+chr(39))}');</script>", height=0))
-                st.caption("Pro版ではコピー＆ペーストなしの直接同期に対応予定です。")
 
-            st.markdown("**プレビュー（グラフノードを選択すると強調表示）:**")
-            
+            st.markdown("#### 現在のイラスト")
+            st.caption("元のイラストと採用イラストを並べて確認します。")
+            img_c1, img_c2 = st.columns(2)
+            with img_c1:
+                st.caption("元のイラスト")
+                if target_line.image_path and os.path.exists(target_line.image_path):
+                    st.image(target_line.image_path, width="stretch")
+                else:
+                    st.info("元のイラストはありません。")
+            with img_c2:
+                st.caption("採用イラスト")
+                if getattr(target_line, "generated_image_path", None) and os.path.exists(target_line.generated_image_path):
+                    st.image(target_line.generated_image_path, width="stretch")
+                else:
+                    st.info("採用イラストはまだ選択されていません。")
+
+            st.markdown("#### 生成ソース（プロンプト）")
+            st.caption("グラフノードを選択すると、このイラストの生成ソース内で該当語が強調表示されます。")
+
             highlight_words = [project.nodes[nid].display.lower() for nid in st.session_state.selected_node_ids if nid in project.nodes]
-            
+
             preview_html = ""
             display_tokens = get_display_tokens(target_line)
             from core.parser import extract_node_metadata
@@ -2095,13 +2064,10 @@ with col2:
                     preview_html += f"{token}, "
             preview_html = preview_html.strip(", ")
             st.markdown(preview_html, unsafe_allow_html=True)
-            
-            with st.expander("Moduleタグ付き生成ソース（Debug）", expanded=False):
-                st.code(target_line.current_text, language="text")
-            
-            st.markdown("---")
-            new_text = st.text_area("生成ソースを編集", target_line.current_text, key=f"focus_text_{target_line.id}", height=150)
-            c1, c2, c3 = st.columns([1, 1, 1])
+
+            edit_panel = st.expander("生成ソース（プロンプト）を編集", expanded=True)
+            new_text = edit_panel.text_area("生成ソースを編集", target_line.current_text, key=f"focus_text_{target_line.id}", height=150)
+            c1, c2 = edit_panel.columns([1, 1])
             with c1:
                 if new_text != target_line.current_text:
                     if st.button("💾 変更を保存", type="primary"):
@@ -2114,12 +2080,6 @@ with col2:
                         update_line_text(target_line.id, new_text)
                         st.rerun()
             with c2:
-                if st.button("🌱 別ルートのイラストを作る", type="primary"):
-                    new_line_id = duplicate_line(target_line.id, focus_new_branch=True)
-                    if new_line_id:
-                        st.session_state.branch_feedback = "フォーカス中のイラストから別ルートを作成しました。"
-                    st.rerun()
-            with c3:
                 if st.button("✨ 重複語を整理"):
                     push_history()
                     prev_focus = st.session_state.get("focused_line_id")
@@ -2127,31 +2087,69 @@ with col2:
                     restore_focus_after_graph_update(prev_focus)
                     st.rerun()
 
-            with st.expander("読み込み画像 / 生成結果プレビュー", expanded=False):
-                img_c1, img_c2 = st.columns(2)
-                with img_c1:
-                    st.markdown("**元のイラスト**")
-                    if target_line.image_path and os.path.exists(target_line.image_path):
-                        st.image(target_line.image_path, width="stretch")
-                    else:
-                        st.info("元のイラストはありません。")
-                with img_c2:
-                    st.markdown("**採用イラスト**")
-                    if getattr(target_line, "generated_image_path", None) and os.path.exists(target_line.generated_image_path):
-                        st.image(target_line.generated_image_path, width="stretch")
-                    else:
-                        st.info("採用イラストはまだ選択されていません。")
+            with st.expander("生成ソース出力プレビュー（Lite）", expanded=False):
+                st.info("現在の生成ソースにModule切り替えなどを反映した、実際に出力・生成へ使われるプロンプトを表示します。")
+                from core.operations import get_active_tokens
+                fallback_prompt = st.session_state.settings.get("fallback_prompt", "(masterpiece:1.0)")
+                current_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
+                current_generated_text = ", ".join(current_tokens)
 
-            st.markdown("#### このルートの次のイラスト")
-            st.caption("現在の結果を起点に、このルートの次のイラストを作成します。")
-            if st.button("このルートの次のイラストを作る", type="primary"):
-                new_line_id = continue_story_from_line(target_line.id)
-                if new_line_id:
-                    st.session_state.branch_feedback = "次のイラストを作成し、フォーカス編集を移動しました。"
-                st.rerun()
+                col_diff1, col_diff2 = st.columns(2)
+                with col_diff1:
+                    st.caption("表示用プロンプト")
+                    st.code(", ".join(get_display_tokens_from_text(target_line.current_text)), language="text")
+                with col_diff2:
+                    st.caption("出力される生成ソース")
+                    st.code(current_generated_text, language="text")
+
+                stats = get_structural_stats(target_line.current_text, current_generated_text)
+                c_stat1, c_stat2, c_stat3 = st.columns(3)
+                c_stat1.metric("トークン差分", f"{stats['token_delta']:+d}")
+                c_stat2.metric("有効Module", stats['mod_count'])
+                c_stat3.metric("変化率", f"{stats['change_ratio']:.1%}")
+
+                st.markdown("**生成ソースのヒント:**")
+                with st.container(border=True):
+                    hints = []
+                    if stats['mod_count'] > 0:
+                        hints.append("- 🧩 **Module検出**: Moduleによる制御やタグ再利用が含まれています。")
+                    if abs(stats['token_delta']) > 5:
+                        hints.append("- 📏 **長さの変化**: プロンプトの強調バランスが変わる可能性があります。")
+                    if stats['has_weights']:
+                        hints.append("- ⚖️ **ウェイト**: 出力結果の強さや優先度が変わる可能性があります。")
+                    if stats['change_ratio'] > 0.4:
+                        hints.append("- 🌊 **変化大**: 元の意図から大きく変わる可能性があります。")
+
+                    if hints:
+                        for h in hints:
+                            st.markdown(h)
+                    else:
+                        st.info("構造上の変化は小さめです。")
+
+                st.text_area("最終生成ソース（手動コピー用）", current_generated_text, height=100)
+                st.button("📋 クリップボードへコピー", on_click=lambda: components.html(f"<script>navigator.clipboard.writeText('{current_generated_text.replace(chr(39), chr(92)+chr(39))}');</script>", height=0))
+                st.caption("Pro版ではコピー＆ペーストなしの直接同期に対応予定です。")
+
+            with st.expander("Moduleタグ付き生成ソース（Debug）", expanded=False):
+                st.code(target_line.current_text, language="text")
+
+            st.markdown("#### 別ルート / 続きを作る")
+            st.caption("現在のイラストを起点に、別ルートまたはこのルートの次のイラストを作成します。")
+            branch_col, continue_col = st.columns(2)
+            with branch_col:
+                if st.button("🌱 別ルートのイラストを作る", type="primary"):
+                    new_line_id = duplicate_line(target_line.id, focus_new_branch=True)
+                    if new_line_id:
+                        st.session_state.branch_feedback = "フォーカス中のイラストから別ルートを作成しました。"
+                    st.rerun()
+            with continue_col:
+                if st.button("このルートの次のイラストを作る", type="primary"):
+                    new_line_id = continue_story_from_line(target_line.id)
+                    if new_line_id:
+                        st.session_state.branch_feedback = "次のイラストを作成し、フォーカス編集を移動しました。"
+                    st.rerun()
 
             st.markdown("#### 生成・比較")
-            render_lite_comfy_workflow_debug_preview(target_line)
             st.caption("Liteではフォーカス中の1イラストずつ生成します。一括生成や大規模な生成プールはPro版機能です。")
             if st.button("🎨 ComfyUIで候補イラストを生成", type="primary"):
                 try:
@@ -2189,6 +2187,10 @@ with col2:
                 except Exception as e:
                     st.error(f"Liteの単体生成に失敗しました: {e}")
 
+            render_lite_comfy_workflow_debug_preview(target_line)
+
+            st.markdown("#### 候補イラスト管理")
+            st.caption("候補を比較し、採用イラストまたは次の生成に使う元のイラストとして設定できます。")
             candidates = list(_get_line_generated_candidates(target_line))
             existing_candidates = [
                 candidate
