@@ -1,6 +1,6 @@
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
-from core.io import load_directory, export_to_txt, save_project_to_json, load_project_from_json
+from core.io import load_directory, export_to_txt, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import
 from core.graph_builder import build_graph
 from core.operations import rename_node, delete_nodes, insert_node, duplicate_nodes, move_nodes, merge_duplicates_in_line, merge_duplicates_all_lines, apply_node_weight, insert_subgraph, replace_with_subgraph, rename_word_global, delete_word_global, insert_word_global, count_matches, get_available_modules, get_active_tokens, get_display_tokens, get_display_tokens_from_text, extract_module_structure_from_text
 from core.parser import parse_prompt
@@ -1010,12 +1010,46 @@ if st.sidebar.button("フォルダから読み込む", key="import_directory"):
     else:
         st.sidebar.error("フォルダパスが正しくありません。")
 
-st.sidebar.button(
-    "PNGメタデータ読み込み（Preview）",
-    disabled=True,
-    help="Preview表示です。Liteではフォルダ読み込みが現在の対応フローです。",
-    key="png_metadata_import_preview",
-)
+if st.sidebar.button(
+    "PNGメタデータから読み込む",
+    help="生成情報付きPNGから生成ソース（プロンプト）を復元します。",
+    key="png_metadata_import",
+):
+    if os.path.isdir(target_dir):
+        if st.session_state.project:
+            push_history()
+            project = st.session_state.project
+        else:
+            st.session_state.history = []
+            project = Project(source_directory=target_dir)
+
+        with st.spinner("PNGメタデータから生成ソース（プロンプト）を復元しています..."):
+            import_summary = add_image_metadata_import(project, target_dir)
+            project, line_summary = create_prompt_lines_from_latest_image_import(project)
+            project = build_graph(project)
+
+        st.session_state.project = project
+        st.session_state.current_project_path = ""
+        st.session_state.focused_line_id = None
+        st.session_state.selected_node_ids = []
+        st.session_state.connect_mode = False
+        st.session_state.connect_nodes = []
+        st.session_state.settings["last_source_directory"] = target_dir
+        save_settings(st.session_state.settings)
+        sync_text_areas()
+
+        no_metadata_count = max(import_summary.get("image_count", 0) - import_summary.get("metadata_count", 0), 0)
+        st.sidebar.success(
+            f"読み込み成功: {line_summary['created_count']}件 / "
+            f"スキップ: {line_summary['skipped_count']}件 / "
+            f"メタデータなし: {no_metadata_count}件"
+        )
+        if import_summary.get("warnings"):
+            st.sidebar.warning(f"警告: {len(import_summary['warnings'])}件のPNGを確認してください。")
+        if line_summary["created_count"] == 0:
+            st.sidebar.info("生成ソース（プロンプト）を復元できるPNGメタデータが見つかりませんでした。")
+    else:
+        st.sidebar.error("フォルダパスが正しくありません。")
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("出力")
