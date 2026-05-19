@@ -994,24 +994,47 @@ st.sidebar.subheader("イラスト集ワークスペース")
 st.sidebar.warning("まず、新規プロジェクトを作るか、保存済みプロジェクトを開いてください。")
 
 current_project_path = st.session_state.get("current_project_path") or ""
-if current_project_path:
-    st.sidebar.code(current_project_path, language="text")
-elif st.session_state.project:
-    st.sidebar.success("未保存のイラスト集ワークスペースを編集中です。")
-else:
-    st.sidebar.info("プロジェクトはまだ開かれていません。新規作成または保存済みプロジェクトを開いてください。")
-st.sidebar.caption(f"現在のプロジェクト: {current_project_path or '(保存先なし)'}")
-st.sidebar.caption(f"最終保存: {st.session_state.last_saved_at or '(まだ保存されていません)'}")
-autosave_status = "自動保存: 有効" if current_project_path else "自動保存: 待機中（保存先なし）"
-st.sidebar.caption(autosave_status)
-if st.session_state.autosave_feedback:
-    st.sidebar.caption(st.session_state.autosave_feedback)
-
 overview = project_stats(st.session_state.project)
 last_project_path = get_last_project_path(st.session_state.settings)
 recent_projects = get_recent_projects(st.session_state.settings)
 project_file_default = current_project_path or last_project_path or "project.json"
 json_path_default = current_project_path or "project.json"
+
+with st.sidebar.container(border=True):
+    st.markdown("#### 📁 現在のプロジェクト")
+    if current_project_path:
+        st.code(current_project_path, language="text")
+    elif st.session_state.project:
+        st.success("未保存のイラスト集ワークスペースを編集中です。")
+    else:
+        st.info("プロジェクトはまだ開かれていません。")
+
+    st.markdown(f"**最終保存:** {st.session_state.last_saved_at or '(まだ保存されていません)'}")
+    autosave_status = "有効" if current_project_path else "待機中（保存先なし）"
+    st.markdown(f"**自動保存:** {autosave_status}")
+    if st.session_state.autosave_feedback:
+        st.caption(st.session_state.autosave_feedback)
+
+    st.caption("現在のプロジェクトJSONへ手動保存します。")
+    if st.button("💾 現在のプロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project", type="primary"):
+        save_current_project_if_possible()
+
+    with st.expander("プロジェクトを別名で保存", expanded=False):
+        st.caption("現在の保存先とは別のJSONとして手動保存します。自動保存ではありません。")
+        json_path = st.text_input("プロジェクトJSON", json_path_default, key="save_project_json_path")
+        if st.button("プロジェクトを別名で保存"):
+            if st.session_state.project:
+                save_project_to_json(st.session_state.project, json_path)
+                st.session_state.current_project_path = os.path.abspath(json_path)
+                ensure_project_folder_layout(st.session_state.current_project_path)
+                st.session_state.settings = remember_project(
+                    st.session_state.settings,
+                    st.session_state.current_project_path,
+                )
+                save_settings(st.session_state.settings)
+                st.session_state.last_saved_at = _saved_time_label()
+                st.session_state.autosave_feedback = "自動保存: 有効"
+                st.success("プロジェクトを保存しました。")
 
 with st.sidebar.expander("新規プロジェクトを作る", expanded=False):
     st.caption("新しいイラスト集ワークスペースを作成します。project.jsonとgeneratedフォルダを用意します。")
@@ -1063,27 +1086,6 @@ with st.sidebar.expander("プロジェクトを開く", expanded=False):
         if load_project_json_into_session(open_project_path):
             st.success("プロジェクトを開きました。")
             st.rerun()
-
-st.sidebar.caption("手動保存です。現在のプロジェクトJSONへ上書き保存します。")
-if st.button("プロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project"):
-    save_current_project_if_possible()
-
-with st.sidebar.expander("プロジェクトを別名で保存", expanded=False):
-    st.caption("現在の保存先とは別のJSONとして手動保存します。自動保存ではありません。")
-    json_path = st.text_input("プロジェクトJSON", json_path_default, key="save_project_json_path")
-    if st.button("プロジェクトを別名で保存"):
-        if st.session_state.project:
-            save_project_to_json(st.session_state.project, json_path)
-            st.session_state.current_project_path = os.path.abspath(json_path)
-            ensure_project_folder_layout(st.session_state.current_project_path)
-            st.session_state.settings = remember_project(
-                st.session_state.settings,
-                st.session_state.current_project_path,
-            )
-            save_settings(st.session_state.settings)
-            st.session_state.last_saved_at = _saved_time_label()
-            st.session_state.autosave_feedback = "自動保存: 有効"
-            st.success("プロジェクトを保存しました。")
 
 with st.sidebar.expander("プロジェクト統計を表示", expanded=bool(st.session_state.project)):
     st.caption("有効なイラスト、別ルート、続き、候補イラスト、採用イラストを確認します。")
