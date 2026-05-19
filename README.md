@@ -22,7 +22,7 @@ but also for future AI-assisted workflows and agent-driven prompt systems.
 
 PromptGraph Lite is the entry point for the core PromptGraph concept:
 
-- **Story Workspace**: Create a new lineage workspace or open a saved JSON project before editing.
+- **Story Workspace**: Create a dedicated project folder with `project.json` and `generated/`, or open a saved JSON project before editing.
 - **Start from Existing Assets**: Import `.txt` prompt files, same-name PNG/JPG images, and PNG generation metadata from existing illustration folders.
 - **Create & Continue Scenes**: Review Prompt Lineage, Focus Edit one scene, then Branch, Continue Story, or Generate candidates.
 - **Save & Export**: Save the lineage workspace as JSON or export active scene prompts to combined TXT. Batch generation is Pro-only.
@@ -164,6 +164,7 @@ This enables future support for:
 - Merge identical words
 - Rename/Delete preview
 - JSON save/load
+- Project folder creation with initial `project.json` and `generated/`
 - Project Overview with lineage, branch, continuation, candidate, and After-image counts
 - Recent project tracking for saved JSON workspaces
 - TXT export

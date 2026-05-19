@@ -1,6 +1,6 @@
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
-from core.io import load_directory, export_to_txt, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import
+from core.io import load_directory, export_to_txt, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import, create_project_workspace, ensure_project_folder_layout, project_dir_from_path
 from core.graph_builder import build_graph
 from core.operations import rename_node, delete_nodes, insert_node, duplicate_nodes, move_nodes, merge_duplicates_in_line, merge_duplicates_all_lines, apply_node_weight, insert_subgraph, replace_with_subgraph, rename_word_global, delete_word_global, insert_word_global, count_matches, get_available_modules, get_active_tokens, get_display_tokens, get_display_tokens_from_text, extract_module_structure_from_text
 from core.parser import parse_prompt
@@ -104,6 +104,42 @@ def start_new_project():
     st.session_state.shortcut_feedback = ""
     st.session_state.branch_feedback = ""
 
+def create_new_project_workspace(parent_dir: str, project_name: str) -> tuple[bool, str]:
+    project_path, folders, error = create_project_workspace(parent_dir, project_name)
+    if error:
+        return False, error
+
+    project_root = project_dir_from_path(project_path)
+    project = build_graph(Project(source_directory=project_root))
+    save_project_to_json(project, project_path)
+    st.session_state.history = []
+    st.session_state.project = project
+    st.session_state.current_project_path = os.path.abspath(project_path)
+    st.session_state.focused_line_id = None
+    st.session_state.selected_node_ids = []
+    st.session_state.disabled_modules = set()
+    st.session_state.connect_mode = False
+    st.session_state.connect_nodes = []
+    st.session_state.shortcut_feedback = ""
+    st.session_state.branch_feedback = ""
+    st.session_state.settings = remember_project(
+        st.session_state.settings,
+        st.session_state.current_project_path,
+    )
+    save_settings(st.session_state.settings)
+    sync_text_areas()
+    generated_dir = folders.get("generated") or os.path.join(project_root, "generated")
+    return True, f"project.jsonを作成しました。generatedフォルダを作成しました: {generated_dir}"
+
+def get_generated_output_dir(project) -> str:
+    source_directory = getattr(project, "source_directory", "") if project else ""
+    if source_directory:
+        return os.path.join(source_directory, "generated")
+    current_project_path = st.session_state.get("current_project_path") or ""
+    if current_project_path:
+        return os.path.join(project_dir_from_path(current_project_path), "generated")
+    return os.path.join(".", "generated")
+
 def load_project_json_into_session(project_path: str) -> bool:
     if not os.path.exists(project_path):
         st.warning(f"プロジェクトファイルが見つかりません: {project_path}")
@@ -114,6 +150,7 @@ def load_project_json_into_session(project_path: str) -> bool:
     project = build_graph(project)
     st.session_state.project = project
     st.session_state.current_project_path = os.path.abspath(project_path)
+    ensure_project_folder_layout(st.session_state.current_project_path)
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
     st.session_state.connect_mode = False
@@ -909,13 +946,20 @@ recent_projects = get_recent_projects(st.session_state.settings)
 project_file_default = current_project_path or last_project_path or "project.json"
 json_path_default = current_project_path or "project.json"
 
-project_cols = st.sidebar.columns(2)
+with st.sidebar.expander("新規プロジェクト", expanded=False):
+    st.caption("新しいイラスト集ワークスペースを作成します。project.jsonとgeneratedフォルダを用意します。")
+    project_parent_dir = st.text_input("プロジェクトフォルダ", "projects", key="new_project_parent_dir")
+    project_name = st.text_input("プロジェクト名", "PromptGraphLiteProject", key="new_project_name")
+    if st.button("新規プロジェクトを作成", type="primary", key="create_project_workspace"):
+        created, message = create_new_project_workspace(project_parent_dir, project_name)
+        if created:
+            st.success(message)
+            st.rerun()
+        else:
+            st.warning(message)
+
+project_cols = st.sidebar.columns(1)
 with project_cols[0]:
-    if st.button("新規プロジェクト", type="primary", key="new_story_project"):
-        start_new_project()
-        st.success("新しいイラスト集ワークスペースを作成しました。")
-        st.rerun()
-with project_cols[1]:
     if st.button("前回のプロジェクトを開く", disabled=not last_project_path, key="open_last_project"):
         if load_project_json_into_session(last_project_path):
             st.success("プロジェクトを開きました。")
@@ -952,6 +996,7 @@ with st.sidebar.expander("プロジェクトを開く", expanded=False):
 if st.button("プロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project"):
     save_project_to_json(st.session_state.project, json_path_default)
     st.session_state.current_project_path = os.path.abspath(json_path_default)
+    ensure_project_folder_layout(st.session_state.current_project_path)
     st.session_state.settings = remember_project(
         st.session_state.settings,
         st.session_state.current_project_path,
@@ -966,6 +1011,7 @@ with st.sidebar.expander("名前を付けて保存", expanded=False):
         if st.session_state.project:
             save_project_to_json(st.session_state.project, json_path)
             st.session_state.current_project_path = os.path.abspath(json_path)
+            ensure_project_folder_layout(st.session_state.current_project_path)
             st.session_state.settings = remember_project(
                 st.session_state.settings,
                 st.session_state.current_project_path,
@@ -2086,7 +2132,8 @@ with col2:
             if st.button("🎨 ComfyUIで候補イラストを生成", type="primary"):
                 try:
                     workflow_json = build_lite_generation_workflow(target_line)
-                    output_dir = os.path.join(st.session_state.project.source_directory or ".", "generated")
+                    output_dir = get_generated_output_dir(st.session_state.project)
+                    os.makedirs(output_dir, exist_ok=True)
 
                     progress_bar = st.progress(0.0)
                     status_text = st.empty()
