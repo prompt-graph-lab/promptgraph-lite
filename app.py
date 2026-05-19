@@ -10,6 +10,7 @@ import os
 import uuid
 import copy
 import json
+from datetime import datetime
 from core.comfyui import generate_image_with_progress
 from core.settings import load_settings, save_settings, get_last_project_path, get_recent_projects, remember_project, EDITION
 import sys
@@ -67,6 +68,53 @@ if "shortcut_feedback" not in st.session_state:
     st.session_state.shortcut_feedback = ""
 if "branch_feedback" not in st.session_state:
     st.session_state.branch_feedback = ""
+if "last_saved_at" not in st.session_state:
+    st.session_state.last_saved_at = ""
+if "autosave_feedback" not in st.session_state:
+    st.session_state.autosave_feedback = ""
+
+def _saved_time_label() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+def _file_saved_time_label(path: str) -> str:
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
+    except OSError:
+        return ""
+
+def save_current_project_if_possible(reason: str = "", quiet: bool = False) -> bool:
+    project = st.session_state.get("project")
+    current_project_path = st.session_state.get("current_project_path") or ""
+    if not project:
+        if not quiet:
+            st.warning("保存するプロジェクトがありません。")
+        return False
+    if not current_project_path:
+        if not quiet:
+            st.warning("このプロジェクトはまだ保存先がありません。プロジェクトを別名で保存してください。")
+        return False
+
+    save_project_to_json(project, current_project_path)
+    st.session_state.current_project_path = os.path.abspath(current_project_path)
+    ensure_project_folder_layout(st.session_state.current_project_path)
+    st.session_state.settings = remember_project(
+        st.session_state.settings,
+        st.session_state.current_project_path,
+    )
+    save_settings(st.session_state.settings)
+    st.session_state.last_saved_at = _saved_time_label()
+    label = f"自動保存しました: {reason}" if reason else "自動保存しました。"
+    if quiet:
+        st.session_state.autosave_feedback = label
+    else:
+        st.success("プロジェクトを保存しました。")
+    return True
+
+def autosave_current_project(reason: str = "") -> bool:
+    if not st.session_state.get("current_project_path"):
+        st.session_state.autosave_feedback = "自動保存: 待機中（保存先なし）"
+        return False
+    return save_current_project_if_possible(reason=reason, quiet=True)
 
 def push_history():
     if st.session_state.project:
@@ -103,6 +151,8 @@ def start_new_project():
     st.session_state.connect_nodes = []
     st.session_state.shortcut_feedback = ""
     st.session_state.branch_feedback = ""
+    st.session_state.last_saved_at = ""
+    st.session_state.autosave_feedback = "自動保存: 待機中（保存先なし）"
 
 def create_new_project_workspace(parent_dir: str, project_name: str) -> tuple[bool, str]:
     project_path, folders, error = create_project_workspace(parent_dir, project_name)
@@ -128,6 +178,8 @@ def create_new_project_workspace(parent_dir: str, project_name: str) -> tuple[bo
     )
     save_settings(st.session_state.settings)
     sync_text_areas()
+    st.session_state.last_saved_at = _saved_time_label()
+    st.session_state.autosave_feedback = "自動保存: 有効"
     generated_dir = folders.get("generated") or os.path.join(project_root, "generated")
     return True, f"project.jsonを作成しました。generatedフォルダを作成しました: {generated_dir}"
 
@@ -162,6 +214,8 @@ def load_project_json_into_session(project_path: str) -> bool:
         st.session_state.current_project_path,
     )
     save_settings(st.session_state.settings)
+    st.session_state.last_saved_at = _file_saved_time_label(st.session_state.current_project_path)
+    st.session_state.autosave_feedback = "自動保存: 有効"
     return True
 
 def get_line_by_id(project, line_id):
@@ -382,6 +436,7 @@ def update_line_text(line_id: str, new_text: str):
     prev_focus = st.session_state.get("focused_line_id")
     st.session_state.project = build_graph(st.session_state.project)
     restore_focus_after_graph_update(prev_focus)
+    autosave_current_project("生成ソースを編集")
 
 def delete_line(line_id: str):
     push_history()
@@ -394,6 +449,7 @@ def delete_line(line_id: str):
     restore_focus_after_graph_update(prev_focus)
     # Check if selected nodes still exist
     st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+    autosave_current_project("イラストを削除")
 
 def duplicate_line(line_id: str, focus_new_branch: bool = False) -> str | None:
     push_history()
@@ -422,6 +478,7 @@ def duplicate_line(line_id: str, focus_new_branch: bool = False) -> str | None:
     restore_focus_after_graph_update(prev_focus)
     st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
     sync_text_areas()
+    autosave_current_project("別ルートを作成")
     return new_line_id
 
 def continue_story_from_line(line_id: str) -> str | None:
@@ -461,6 +518,7 @@ def continue_story_from_line(line_id: str) -> str | None:
     restore_focus_after_graph_update(new_line_id)
     st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
     sync_text_areas()
+    autosave_current_project("このルートの次のイラストを作成")
     return new_line_id
 
 def get_candidate_image_paths(line) -> list[str]:
@@ -649,11 +707,13 @@ def set_candidate_as_after(line, image_path: str):
     add_candidate_image(line, image_path)
     line.generated_image_path = image_path
     line.selected_candidate_path = image_path
+    autosave_current_project("候補を採用イラストに設定")
 
 def set_candidate_as_reference(line, image_path: str):
     push_history()
     add_candidate_image(line, image_path)
     line.image_path = image_path
+    autosave_current_project("候補を元のイラストに設定")
 
 def build_lite_generation_workflow(target_line):
     if not os.path.exists(st.session_state.comfy_workflow_path):
@@ -733,6 +793,7 @@ def move_line(line_id: str, visible_line_ids: list[str], direction: str) -> bool
     prev_focus = st.session_state.get("focused_line_id")
     st.session_state.project = build_graph(st.session_state.project)
     restore_focus_after_graph_update(prev_focus)
+    autosave_current_project("イラストを並べ替え")
     st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
     sync_text_areas()
     return True
@@ -939,6 +1000,12 @@ elif st.session_state.project:
     st.sidebar.success("未保存のイラスト集ワークスペースを編集中です。")
 else:
     st.sidebar.info("プロジェクトはまだ開かれていません。新規作成または保存済みプロジェクトを開いてください。")
+st.sidebar.caption(f"現在のプロジェクト: {current_project_path or '(保存先なし)'}")
+st.sidebar.caption(f"最終保存: {st.session_state.last_saved_at or '(まだ保存されていません)'}")
+autosave_status = "自動保存: 有効" if current_project_path else "自動保存: 待機中（保存先なし）"
+st.sidebar.caption(autosave_status)
+if st.session_state.autosave_feedback:
+    st.sidebar.caption(st.session_state.autosave_feedback)
 
 overview = project_stats(st.session_state.project)
 last_project_path = get_last_project_path(st.session_state.settings)
@@ -999,15 +1066,7 @@ with st.sidebar.expander("プロジェクトを開く", expanded=False):
 
 st.sidebar.caption("手動保存です。現在のプロジェクトJSONへ上書き保存します。")
 if st.button("プロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project"):
-    save_project_to_json(st.session_state.project, json_path_default)
-    st.session_state.current_project_path = os.path.abspath(json_path_default)
-    ensure_project_folder_layout(st.session_state.current_project_path)
-    st.session_state.settings = remember_project(
-        st.session_state.settings,
-        st.session_state.current_project_path,
-    )
-    save_settings(st.session_state.settings)
-    st.success("プロジェクトを保存しました。")
+    save_current_project_if_possible()
 
 with st.sidebar.expander("プロジェクトを別名で保存", expanded=False):
     st.caption("現在の保存先とは別のJSONとして手動保存します。自動保存ではありません。")
@@ -1022,6 +1081,8 @@ with st.sidebar.expander("プロジェクトを別名で保存", expanded=False)
                 st.session_state.current_project_path,
             )
             save_settings(st.session_state.settings)
+            st.session_state.last_saved_at = _saved_time_label()
+            st.session_state.autosave_feedback = "自動保存: 有効"
             st.success("プロジェクトを保存しました。")
 
 with st.sidebar.expander("プロジェクト統計を表示", expanded=bool(st.session_state.project)):
@@ -1050,6 +1111,8 @@ if st.sidebar.button("フォルダから読み込む", key="import_directory"):
             project = build_graph(project)
         st.session_state.project = project
         st.session_state.current_project_path = ""
+        st.session_state.last_saved_at = ""
+        st.session_state.autosave_feedback = "自動保存: 待機中（保存先なし）"
         st.session_state.focused_line_id = None
         st.session_state.selected_node_ids = []
         st.session_state.connect_mode = False
@@ -1067,6 +1130,7 @@ if st.sidebar.button(
     key="png_metadata_import",
 ):
     if os.path.isdir(target_dir):
+        previous_project_path = st.session_state.get("current_project_path") or ""
         if st.session_state.project:
             push_history()
             project = st.session_state.project
@@ -1080,7 +1144,9 @@ if st.sidebar.button(
             project = build_graph(project)
 
         st.session_state.project = project
-        st.session_state.current_project_path = ""
+        st.session_state.current_project_path = previous_project_path
+        if not previous_project_path:
+            st.session_state.last_saved_at = ""
         st.session_state.focused_line_id = None
         st.session_state.selected_node_ids = []
         st.session_state.connect_mode = False
@@ -1088,6 +1154,7 @@ if st.sidebar.button(
         st.session_state.settings["last_source_directory"] = target_dir
         save_settings(st.session_state.settings)
         sync_text_areas()
+        autosave_current_project("PNGメタデータを読み込み")
 
         no_metadata_count = max(import_summary.get("image_count", 0) - import_summary.get("metadata_count", 0), 0)
         st.sidebar.success(
@@ -2182,6 +2249,7 @@ with col2:
                         )
                         target_line.generated_image_path = gen_path
                         target_line.selected_candidate_path = gen_path
+                        autosave_current_project("候補イラストを生成")
                         st.success("候補イラストを1枚生成しました。")
                         st.rerun()
                 except Exception as e:
