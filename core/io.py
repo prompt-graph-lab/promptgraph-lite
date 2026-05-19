@@ -57,6 +57,45 @@ def _normalize_project_metadata(metadata) -> dict:
         normalized.update(metadata)
     return normalized
 
+def project_dir_from_path(project_path: str) -> str:
+    return os.path.dirname(os.path.abspath(project_path)) if project_path else ""
+
+def ensure_project_folder_layout(project_path: str) -> dict:
+    if not project_path:
+        return {}
+
+    project_dir = project_dir_from_path(project_path)
+    folders = {}
+    for folder_name in ("generated",):
+        folder_path = os.path.join(project_dir, folder_name)
+        os.makedirs(folder_path, exist_ok=True)
+        folders[folder_name] = folder_path
+    return folders
+
+def _safe_project_name(project_name: str) -> str:
+    clean_name = (project_name or "").strip()
+    safe_name = "".join(ch if ch.isalnum() or ch in ("-", "_", " ") else "_" for ch in clean_name).strip()
+    return safe_name or "PromptGraphLiteProject"
+
+def create_project_workspace(parent_dir: str, project_name: str) -> tuple[str | None, dict, str | None]:
+    clean_parent_raw = (parent_dir or "").strip()
+    if not clean_parent_raw:
+        return None, {}, "プロジェクトフォルダを入力してください。"
+    if not (project_name or "").strip():
+        return None, {}, "プロジェクト名を入力してください。"
+    clean_parent = os.path.abspath(os.path.expanduser(clean_parent_raw))
+
+    safe_name = _safe_project_name(project_name)
+    project_dir = os.path.join(clean_parent, safe_name)
+    project_path = os.path.join(project_dir, "project.json")
+
+    if os.path.exists(project_path):
+        return None, {}, "project.jsonが既に存在します。既存プロジェクトを開くか、別のプロジェクト名を指定してください。"
+
+    os.makedirs(project_dir, exist_ok=True)
+    folders = ensure_project_folder_layout(project_path)
+    return project_path, folders, None
+
 def _candidate_path(candidate):
     if isinstance(candidate, dict):
         return str(candidate.get("path") or "")
