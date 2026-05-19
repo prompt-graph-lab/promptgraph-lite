@@ -753,6 +753,8 @@ def _unique_export_dir(output_dir: str) -> str:
 def _resolve_export_image_path(project: Project, image_path: str) -> str:
     if not image_path:
         return ""
+    if os.path.exists(image_path):
+        return os.path.abspath(image_path)
     if os.path.isabs(image_path):
         return image_path
     source_directory = getattr(project, "source_directory", "") or ""
