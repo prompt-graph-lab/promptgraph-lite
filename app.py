@@ -1211,14 +1211,28 @@ with st.sidebar.expander("イラスト・生成ソースセット出力", expand
     st.caption("プロジェクトJSONは保存せず、利用可能なイラスト画像と生成ソースTXTをセットとして出力します。")
     default_set_export_dir = st.session_state.settings.get("last_export_set_directory", "prompt_image_export")
     export_set_dir = st.text_input("セット出力フォルダ", default_set_export_dir, key="export_prompt_image_set_dir")
+    export_filename_prefix = st.text_input(
+        "ファイル名プレフィックス",
+        st.session_state.settings.get("last_export_filename_prefix", "illustration"),
+        key="export_prompt_image_filename_prefix",
+    )
+    include_kind_label = st.checkbox(
+        "reference/candidate等の種別名を付ける",
+        value=st.session_state.settings.get("last_export_include_kind_label", True),
+        key="export_prompt_image_include_kind_label",
+    )
     if st.button("イラスト・生成ソースセットを出力", key="export_prompt_image_set"):
         if st.session_state.project:
             summary = export_prompt_image_set(
                 st.session_state.project,
                 export_set_dir,
                 disabled_modules=st.session_state.disabled_modules,
+                filename_prefix=export_filename_prefix,
+                include_kind_label=include_kind_label,
             )
             st.session_state.settings["last_export_set_directory"] = export_set_dir
+            st.session_state.settings["last_export_filename_prefix"] = export_filename_prefix
+            st.session_state.settings["last_export_include_kind_label"] = include_kind_label
             save_settings(st.session_state.settings)
             st.sidebar.success(
                 f"出力成功: 生成ソース {summary['prompt_count']}件 / "
@@ -2222,10 +2236,8 @@ with col2:
                             target_line,
                             _make_generated_candidate_record(gen_path, target_line, "single_generate"),
                         )
-                        target_line.generated_image_path = gen_path
-                        target_line.selected_candidate_path = gen_path
                         autosave_current_project("候補イラストを生成")
-                        st.success("候補イラストを1枚生成しました。")
+                        st.success("候補イラストを1枚生成しました。出力対象イラストにする場合は明示的に選択してください。")
                         st.rerun()
                 except Exception as e:
                     st.error(f"Liteの単体生成に失敗しました: {e}")

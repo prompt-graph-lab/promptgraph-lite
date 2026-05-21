@@ -764,9 +764,9 @@ def _resolve_export_image_path(project: Project, image_path: str) -> str:
 
 def _selected_export_image(project: Project, line: PromptLine) -> tuple[str, str]:
     choices = (
-        ("candidate", getattr(line, "selected_candidate_path", None)),
-        ("after", getattr(line, "generated_image_path", None)),
+        ("output", getattr(line, "selected_candidate_path", None)),
         ("reference", getattr(line, "image_path", None)),
+        ("output", getattr(line, "generated_image_path", None)),
     )
     for image_kind, image_path in choices:
         resolved_path = _resolve_export_image_path(project, image_path)
@@ -774,7 +774,13 @@ def _selected_export_image(project: Project, line: PromptLine) -> tuple[str, str
             return image_kind, resolved_path
     return "", ""
 
-def export_prompt_image_set(project: Project, output_dir: str, disabled_modules: set = None) -> dict:
+def export_prompt_image_set(
+    project: Project,
+    output_dir: str,
+    disabled_modules: set = None,
+    filename_prefix: str = "illustration",
+    include_kind_label: bool = True,
+) -> dict:
     if disabled_modules is None:
         disabled_modules = set()
 
@@ -783,6 +789,7 @@ def export_prompt_image_set(project: Project, output_dir: str, disabled_modules:
     export_dir = _unique_export_dir(output_dir)
     os.makedirs(export_dir, exist_ok=True)
     prompts_path = os.path.join(export_dir, "prompts.txt")
+    safe_prefix = _safe_export_stem(filename_prefix or "illustration")
 
     copied_images = []
     missing_images = []
@@ -799,8 +806,11 @@ def export_prompt_image_set(project: Project, output_dir: str, disabled_modules:
                 continue
 
             extension = os.path.splitext(image_path)[1] or ".png"
-            file_stem = _safe_export_stem(getattr(line, "original_file_name", "") or getattr(line, "id", "illustration"))
-            output_image_path = os.path.join(export_dir, f"{index:04d}_{image_kind}_{file_stem}{extension}")
+            if include_kind_label:
+                image_file_name = f"{index:04d}_{image_kind}_{safe_prefix}{extension}"
+            else:
+                image_file_name = f"{index:04d}_{safe_prefix}{extension}"
+            output_image_path = os.path.join(export_dir, image_file_name)
             shutil.copy2(image_path, output_image_path)
             copied_images.append(output_image_path)
 
@@ -863,7 +873,7 @@ def load_project_from_json(json_path: str) -> Project:
         )
         pl.generated_candidates = candidates
         pl.candidate_image_paths = [candidate["path"] for candidate in candidates]
-        pl.selected_candidate_path = l_data.get("selected_candidate_path") or getattr(pl, "generated_image_path", None)
+        pl.selected_candidate_path = l_data.get("selected_candidate_path")
         pl.continued_from = l_data.get("continued_from")
         pl.negative_prompt = l_data.get("negative_prompt", "")
         project.prompt_lines.append(pl)
