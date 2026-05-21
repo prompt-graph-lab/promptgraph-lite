@@ -524,6 +524,28 @@ def continue_story_from_line(line_id: str) -> str | None:
 def get_candidate_image_paths(line) -> list[str]:
     return [_candidate_path(candidate) for candidate in _get_line_generated_candidates(line)]
 
+def _existing_project_image_path(path: str, project=None) -> str:
+    if not path:
+        return ""
+    if os.path.exists(path):
+        return path
+    source_directory = getattr(project, "source_directory", "") if project else ""
+    if source_directory:
+        candidate_path = os.path.join(source_directory, path)
+        if os.path.exists(candidate_path):
+            return os.path.abspath(candidate_path)
+    return ""
+
+def get_line_thumbnail_path(line, project=None) -> str:
+    for path in (
+        getattr(line, "image_path", None),
+        getattr(line, "generated_image_path", None),
+    ):
+        existing_path = _existing_project_image_path(path, project)
+        if existing_path:
+            return existing_path
+    return ""
+
 def count_line_candidates(line) -> int:
     candidate_paths = []
     candidates = getattr(line, "generated_candidates", None)
@@ -990,7 +1012,7 @@ inject_keyboard_shortcuts()
 render_shortcut_actions()
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("イラスト集ワークスペース")
+st.sidebar.subheader("プロジェクト")
 st.sidebar.warning("まず、新規プロジェクトを作るか、保存済みプロジェクトを開いてください。")
 
 current_project_path = st.session_state.get("current_project_path") or ""
@@ -1015,28 +1037,7 @@ with st.sidebar.container(border=True):
     if st.session_state.autosave_feedback:
         st.caption(st.session_state.autosave_feedback)
 
-    st.caption("現在のプロジェクトJSONへ手動保存します。")
-    if st.button("💾 現在のプロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project", type="primary"):
-        save_current_project_if_possible()
-
-    with st.expander("プロジェクトを別名で保存", expanded=False):
-        st.caption("現在の保存先とは別のJSONとして手動保存します。自動保存ではありません。")
-        json_path = st.text_input("プロジェクトJSON", json_path_default, key="save_project_json_path")
-        if st.button("プロジェクトを別名で保存"):
-            if st.session_state.project:
-                save_project_to_json(st.session_state.project, json_path)
-                st.session_state.current_project_path = os.path.abspath(json_path)
-                ensure_project_folder_layout(st.session_state.current_project_path)
-                st.session_state.settings = remember_project(
-                    st.session_state.settings,
-                    st.session_state.current_project_path,
-                )
-                save_settings(st.session_state.settings)
-                st.session_state.last_saved_at = _saved_time_label()
-                st.session_state.autosave_feedback = "自動保存: 有効"
-                st.success("プロジェクトを保存しました。")
-
-with st.sidebar.expander("新規プロジェクトを作る", expanded=False):
+with st.sidebar.expander("プロジェクトの新規作成", expanded=False):
     st.caption("新しいイラスト集ワークスペースを作成します。project.jsonとgeneratedフォルダを用意します。")
     project_parent_dir = st.text_input("プロジェクトフォルダ", "projects", key="new_project_parent_dir")
     project_name = st.text_input("プロジェクト名", "PromptGraphLiteProject", key="new_project_name")
@@ -1048,19 +1049,18 @@ with st.sidebar.expander("新規プロジェクトを作る", expanded=False):
         else:
             st.warning(message)
 
-if last_project_path:
-    st.sidebar.caption("前回のプロジェクトはここから開けます。自動では開きません。")
-else:
-    st.sidebar.caption("前回のプロジェクトがある場合は、ここから開けます。")
-project_cols = st.sidebar.columns(1)
-with project_cols[0]:
+with st.sidebar.expander("プロジェクトを開く", expanded=False):
+    st.markdown("**前回のプロジェクト**")
+    if last_project_path:
+        st.caption(last_project_path)
+    else:
+        st.caption("前回のプロジェクトはまだありません。")
     if st.button("前回のプロジェクトを開く", disabled=not last_project_path, key="open_last_project"):
         if load_project_json_into_session(last_project_path):
             st.success("プロジェクトを開きました。")
             st.rerun()
 
-with st.sidebar.expander("プロジェクトを開く", expanded=False):
-    st.markdown("**最近使ったプロジェクト**")
+    st.markdown("**最近のプロジェクト**")
     if recent_projects:
         recent_options = [item["path"] for item in recent_projects]
         recent_project_path = st.selectbox(
@@ -1080,14 +1080,37 @@ with st.sidebar.expander("プロジェクトを開く", expanded=False):
     else:
         st.caption("最近使ったプロジェクトはまだありません。")
 
-    st.markdown("**保存済みプロジェクトを開く**")
+    st.markdown("**指定のプロジェクト**")
     open_project_path = st.text_input("プロジェクトJSON", project_file_default, key="open_project_path")
     if st.button("プロジェクトを開く"):
         if load_project_json_into_session(open_project_path):
             st.success("プロジェクトを開きました。")
             st.rerun()
 
-with st.sidebar.expander("プロジェクト統計を表示", expanded=bool(st.session_state.project)):
+with st.sidebar.expander("プロジェクトを保存", expanded=False):
+    st.markdown("**上書き保存**")
+    st.caption("現在のプロジェクトJSONへ手動保存します。")
+    if st.button("💾 現在のプロジェクトを保存", disabled=not bool(st.session_state.project), key="quick_save_project", type="primary"):
+        save_current_project_if_possible()
+
+    st.markdown("**別名保存**")
+    st.caption("現在の保存先とは別のJSONとして手動保存します。自動保存ではありません。")
+    json_path = st.text_input("プロジェクトJSON", json_path_default, key="save_project_json_path")
+    if st.button("プロジェクトを別名で保存"):
+        if st.session_state.project:
+            save_project_to_json(st.session_state.project, json_path)
+            st.session_state.current_project_path = os.path.abspath(json_path)
+            ensure_project_folder_layout(st.session_state.current_project_path)
+            st.session_state.settings = remember_project(
+                st.session_state.settings,
+                st.session_state.current_project_path,
+            )
+            save_settings(st.session_state.settings)
+            st.session_state.last_saved_at = _saved_time_label()
+            st.session_state.autosave_feedback = "自動保存: 有効"
+            st.success("プロジェクトを保存しました。")
+
+with st.sidebar.expander("プロジェクトの統計", expanded=bool(st.session_state.project)):
     st.caption("有効なイラスト、別ルート、続き、候補イラスト、採用イラストを確認します。")
     st.caption(f"読み込み元: {overview['source_directory'] or '(未設定)'}")
     st.caption(f"プロジェクトJSON: {current_project_path or '(未保存)'}")
@@ -1991,9 +2014,10 @@ with col1:
 
 
 with col2:
-    tab1, tab2 = st.tabs(["イラストライン", "ノード操作"])
+    line_section = st.container()
+    node_section = st.container()
 
-    with tab1:
+    with line_section:
         st.subheader("イラストライン")
         st.caption("読み込んだイラストと生成ソースを流れとして確認します。別ルートを作る場合は対象を選び、フォーカス編集で調整します。")
         st.caption("各イラストの ↑ / ↓ で順番を調整できます。並べ替えは1件ずつ行うLite-safeな操作です。")
@@ -2306,10 +2330,17 @@ with col2:
                 elif l.duplicated_from:
                     title += "（別ルート）"
                     
-                col_chk, col_exp = st.columns([0.05, 0.95])
+                col_chk, col_thumb, col_exp = st.columns([0.05, 0.18, 0.77])
                 with col_chk:
                     st.session_state.selected_lines[l.id] = st.checkbox("選択", value=st.session_state.selected_lines.get(l.id, False), key=f"chk_{l.id}", label_visibility="collapsed")
-                
+
+                with col_thumb:
+                    thumbnail_path = get_line_thumbnail_path(l, project)
+                    if thumbnail_path:
+                        st.image(thumbnail_path, width=72)
+                    else:
+                        st.caption("画像なし")
+
                 with col_exp:
                     with st.expander(title):
                         if st.button("🎯 フォーカス編集 / 別ルート", key=f"focus_btn_{l.id}"):
@@ -2352,7 +2383,7 @@ with col2:
                             delete_line(l.id)
                             st.rerun()
 
-    with tab2:
+    with node_section:
         if st.session_state.connect_mode:
             st.subheader("Connect Mode 有効")
             st.info("グラフ上でノードを2つ順番にクリックして接続します。")
