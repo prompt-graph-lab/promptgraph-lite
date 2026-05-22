@@ -543,18 +543,36 @@ def update_line_text(line_id: str, new_text: str):
     restore_focus_after_graph_update(prev_focus)
     autosave_current_project("生成ソースを編集")
 
-def delete_line(line_id: str):
+def delete_lines(line_ids) -> int:
+    target_ids = {line_id for line_id in line_ids if line_id}
+    if not target_ids:
+        return 0
+
+    existing_target_ids = {
+        line.id for line in st.session_state.project.prompt_lines
+        if line.id in target_ids and not getattr(line, "deleted", False)
+    }
+    if not existing_target_ids:
+        return 0
+
+    deleted_count = 0
     push_history()
     for line in st.session_state.project.prompt_lines:
-        if line.id == line_id:
+        if line.id in existing_target_ids:
             line.deleted = True
-            break
+            deleted_count += 1
+
     prev_focus = st.session_state.get("focused_line_id")
     st.session_state.project = build_graph(st.session_state.project)
     restore_focus_after_graph_update(prev_focus)
     # Check if selected nodes still exist
     st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+    st.session_state.selected_lines = {}
     autosave_current_project("イラストを削除")
+    return deleted_count
+
+def delete_line(line_id: str):
+    return delete_lines([line_id])
 
 def duplicate_line(line_id: str, focus_new_branch: bool = False) -> str | None:
     push_history()
@@ -2335,26 +2353,19 @@ with col2:
         
         if "selected_lines" not in st.session_state:
             st.session_state.selected_lines = {}
-            
+
         c_del, c_dup, c_merge = st.columns([1, 1, 1])
+        selected_line_ids = [
+            lid for lid, checked in st.session_state.selected_lines.items()
+            if checked and any(line.id == lid and not getattr(line, "deleted", False) for line in display_lines)
+        ]
         with c_del:
-            if st.button("🗑️ 選択したイラストを削除"):
-                if not require_pro("複数イラストの一括操作はPro版機能です。"):
-                    st.stop()
-                
-                push_history()
-                to_delete = [lid for lid, checked in st.session_state.selected_lines.items() if checked]
-                for lid in to_delete:
-                    for line in st.session_state.project.prompt_lines:
-                        if line.id == lid:
-                            line.deleted = True
-                            break
-                prev_focus = st.session_state.get("focused_line_id")
-                st.session_state.project = build_graph(st.session_state.project)
-                restore_focus_after_graph_update(prev_focus)
-                st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
-                st.session_state.selected_lines = {}
+            if st.button("🗑️ 選択したイラストを削除", disabled=not selected_line_ids):
+                deleted_count = delete_lines(selected_line_ids)
+                if deleted_count:
+                    st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
                 st.rerun()
+            st.caption("プロジェクト上の一覧から削除します。元画像ファイルは削除しません。")
         with c_dup:
             if st.button("📋 選択イラストを一括複製（Pro）"):
                 if not require_pro("複数イラストの一括操作はPro版機能です。"):
@@ -2621,14 +2632,9 @@ with col2:
                             if move_line(l.id, visible_line_ids, "down"):
                                 st.rerun()
                         if c3.button("差分作成", key=f"dup_{l.id}", help="このイラストの直後に差分イラストを作成します"):
-                            new_line_id = duplicate_line(l.id)
-                            if new_line_id:
-                                st.session_state.branch_feedback = "元のイラストの直後に差分イラストを作成しました。"
+                            request_focus_action("branch", l.id)
                             st.rerun()
-                        if c4.button("削除", key=f"del_{l.id}"):
-                            if is_free() and not st.session_state.get("focused_line_id"):
-                                st.error("Lite版では編集に生成ソース（プロンプト）の編集画面が必要です。編集画面に入ってから編集してください。")
-                                st.stop()
+                        if c4.button("削除", key=f"del_{l.id}", help="このイラストを削除"):
                             delete_line(l.id)
                             st.rerun()
 
