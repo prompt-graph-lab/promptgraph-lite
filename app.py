@@ -226,6 +226,78 @@ def get_line_by_id(project, line_id):
         None,
     )
 
+IMPORT_MODE_REPLACE = "上書き読み込み"
+IMPORT_MODE_APPEND = "追加読み込み"
+
+def _clear_import_selection_state() -> None:
+    st.session_state.focused_line_id = None
+    st.session_state.selected_node_ids = []
+    st.session_state.connect_mode = False
+    st.session_state.connect_nodes = []
+    st.session_state.selected_lines = {}
+
+def _imported_lines_for_merge(imported_lines, existing_ids: set[str], start_index: int) -> list:
+    merged_lines = []
+    next_index = start_index
+    for line in imported_lines:
+        if getattr(line, "deleted", False):
+            continue
+        new_line = copy.deepcopy(line)
+        base_id = new_line.id or f"imported_line_{next_index}"
+        candidate_id = base_id
+        suffix = 1
+        while candidate_id in existing_ids:
+            candidate_id = f"{base_id}_{suffix}"
+            suffix += 1
+        existing_ids.add(candidate_id)
+        new_line.id = candidate_id
+        new_line.original_index = next_index
+        new_line.current_index = next_index
+        merged_lines.append(new_line)
+        next_index += 1
+    return merged_lines
+
+def _merge_image_import_metadata(target_project, imported_project) -> None:
+    imported_metadata = getattr(imported_project, "project_metadata", None)
+    imported_image_imports = imported_metadata.get("image_imports", []) if isinstance(imported_metadata, dict) else []
+    if not imported_image_imports:
+        return
+    target_metadata = getattr(target_project, "project_metadata", None)
+    if not isinstance(target_metadata, dict):
+        target_metadata = {"image_imports": []}
+    target_metadata.setdefault("image_imports", []).extend(copy.deepcopy(imported_image_imports))
+    target_project.project_metadata = target_metadata
+
+def apply_imported_project(imported_project, import_mode: str, autosave_reason: str) -> None:
+    previous_project = st.session_state.get("project")
+    previous_project_path = st.session_state.get("current_project_path") or ""
+    if previous_project:
+        push_history()
+
+    if previous_project:
+        project = previous_project
+        if not previous_project_path and import_mode == IMPORT_MODE_REPLACE:
+            project.source_directory = imported_project.source_directory
+    else:
+        st.session_state.history = []
+        project = Project(source_directory=imported_project.source_directory)
+
+    if import_mode == IMPORT_MODE_APPEND:
+        start_index = max((line.current_index for line in project.prompt_lines), default=-1) + 1
+        existing_ids = {line.id for line in project.prompt_lines}
+        project.prompt_lines.extend(_imported_lines_for_merge(imported_project.prompt_lines, existing_ids, start_index))
+    else:
+        project.prompt_lines = _imported_lines_for_merge(imported_project.prompt_lines, set(), 0)
+
+    _merge_image_import_metadata(project, imported_project)
+    st.session_state.project = build_graph(project)
+    st.session_state.current_project_path = previous_project_path
+    if not previous_project_path:
+        st.session_state.last_saved_at = ""
+    _clear_import_selection_state()
+    sync_text_areas()
+    autosave_current_project(autosave_reason)
+
 def _shortcut_context():
     line = get_line_by_id(st.session_state.get("project"), st.session_state.get("focused_line_id"))
     return {
@@ -1130,24 +1202,24 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("プロジェクトにイラスト集を追加")
 st.sidebar.info("手元のイラスト集がある場合は、生成ソース（プロンプト）と画像をフォルダから読み込めます。")
 target_dir = st.sidebar.text_input("読み込みフォルダ", st.session_state.settings.get("last_source_directory", "./dummy_data"))
+import_mode = st.sidebar.radio(
+    "読み込み方法",
+    [IMPORT_MODE_REPLACE, IMPORT_MODE_APPEND],
+    index=0,
+    key="lite_import_mode",
+)
+st.sidebar.caption("上書き読み込み：現在のイラスト一覧を置き換えます")
+st.sidebar.caption("追加読み込み：現在のイラスト一覧の末尾に追加します")
 
 if st.sidebar.button("フォルダから読み込む", key="import_directory"):
     if os.path.isdir(target_dir):
-        st.session_state.history = []
         with st.spinner("イラスト一覧を構築しています..."):
-            project = load_directory(target_dir, max_depth=None)
-            project = build_graph(project)
-        st.session_state.project = project
-        st.session_state.current_project_path = ""
-        st.session_state.last_saved_at = ""
-        st.session_state.autosave_feedback = "自動保存: 待機中（保存先なし）"
-        st.session_state.focused_line_id = None
-        st.session_state.selected_node_ids = []
-        st.session_state.connect_mode = False
-        
+            imported_project = load_directory(target_dir, max_depth=None)
+        apply_imported_project(imported_project, import_mode, "フォルダから読み込み")
+
         st.session_state.settings["last_source_directory"] = target_dir
         save_settings(st.session_state.settings)
-        st.sidebar.success(f"読み込みました: {target_dir}")
+        st.sidebar.success(f"{import_mode}しました: {target_dir}")
         st.rerun()
     else:
         st.sidebar.error("フォルダパスが正しくありません。")
@@ -1158,35 +1230,19 @@ if st.sidebar.button(
     key="png_metadata_import",
 ):
     if os.path.isdir(target_dir):
-        previous_project_path = st.session_state.get("current_project_path") or ""
-        if st.session_state.project:
-            push_history()
-            project = st.session_state.project
-        else:
-            st.session_state.history = []
-            project = Project(source_directory=target_dir)
+        imported_project = Project(source_directory=target_dir)
 
         with st.spinner("PNGメタデータから生成ソース（プロンプト）を復元しています..."):
-            import_summary = add_image_metadata_import(project, target_dir)
-            project, line_summary = create_prompt_lines_from_latest_image_import(project)
-            project = build_graph(project)
+            import_summary = add_image_metadata_import(imported_project, target_dir)
+            imported_project, line_summary = create_prompt_lines_from_latest_image_import(imported_project)
+        apply_imported_project(imported_project, import_mode, "PNGメタデータを読み込み")
 
-        st.session_state.project = project
-        st.session_state.current_project_path = previous_project_path
-        if not previous_project_path:
-            st.session_state.last_saved_at = ""
-        st.session_state.focused_line_id = None
-        st.session_state.selected_node_ids = []
-        st.session_state.connect_mode = False
-        st.session_state.connect_nodes = []
         st.session_state.settings["last_source_directory"] = target_dir
         save_settings(st.session_state.settings)
-        sync_text_areas()
-        autosave_current_project("PNGメタデータを読み込み")
 
         no_metadata_count = max(import_summary.get("image_count", 0) - import_summary.get("metadata_count", 0), 0)
         st.sidebar.success(
-            f"読み込み成功: {line_summary['created_count']}件 / "
+            f"{import_mode}: {line_summary['created_count']}件 / "
             f"スキップ: {line_summary['skipped_count']}件 / "
             f"メタデータなし: {no_metadata_count}件"
         )
