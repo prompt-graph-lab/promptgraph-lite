@@ -77,7 +77,7 @@ if "pending_focus_action" not in st.session_state:
 if "pending_gallery_action" not in st.session_state:
     st.session_state.pending_gallery_action = None
 if "selection_mode_enabled" not in st.session_state:
-    st.session_state.selection_mode_enabled = False
+    st.session_state.selection_mode_enabled = True
 if "selection_mode_delete_candidates" not in st.session_state:
     st.session_state.selection_mode_delete_candidates = {}
 if "gallery_expanded_line_id" not in st.session_state:
@@ -156,6 +156,7 @@ def start_new_project():
     st.session_state.current_project_path = ""
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
+    st.session_state.selection_mode_enabled = True
     st.session_state.disabled_modules = set()
     st.session_state.connect_mode = False
     st.session_state.connect_nodes = []
@@ -177,6 +178,7 @@ def create_new_project_workspace(parent_dir: str, project_name: str) -> tuple[bo
     st.session_state.current_project_path = os.path.abspath(project_path)
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
+    st.session_state.selection_mode_enabled = True
     st.session_state.disabled_modules = set()
     st.session_state.connect_mode = False
     st.session_state.connect_nodes = []
@@ -246,6 +248,7 @@ def load_project_json_into_session(project_path: str) -> bool:
     ensure_project_folder_layout(st.session_state.current_project_path)
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
+    st.session_state.selection_mode_enabled = True
     st.session_state.connect_mode = False
     st.session_state.connect_nodes = []
     sync_text_areas()
@@ -273,6 +276,7 @@ IMPORT_MODE_APPEND = "追加読み込み"
 def _clear_import_selection_state() -> None:
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
+    st.session_state.selection_mode_enabled = True
     st.session_state.connect_mode = False
     st.session_state.connect_nodes = []
     st.session_state.selected_lines = {}
@@ -779,13 +783,26 @@ def show_missing_image_debug(path: str, project=None) -> None:
 
 def get_line_thumbnail_path(line, project=None) -> str:
     for path in (
-        getattr(line, "image_path", None),
+        getattr(line, "selected_candidate_path", None),
         getattr(line, "generated_image_path", None),
+        getattr(line, "image_path", None),
     ):
         existing_path = _existing_project_image_path(path, project)
         if existing_path:
             return existing_path
     return ""
+
+def is_line_output_path(line, image_path: str, project=None) -> bool:
+    candidate_identity = _candidate_identity_path(image_path, project)
+    if not candidate_identity:
+        return False
+    for output_path in (
+        getattr(line, "selected_candidate_path", None),
+        getattr(line, "generated_image_path", None),
+    ):
+        if candidate_identity == _candidate_identity_path(output_path, project):
+            return True
+    return False
 
 def get_line_candidate_items(line, project=None) -> list[tuple[str, str]]:
     items = []
@@ -842,7 +859,7 @@ def render_gallery_line_editor(line, project) -> None:
         for index, (stored_path, resolved_path) in enumerate(candidate_items[:4]):
             with candidate_cols[index % 4]:
                 st.image(resolved_path, width=160)
-                is_output = stored_path == getattr(line, "selected_candidate_path", None) or stored_path == getattr(line, "generated_image_path", None)
+                is_output = is_line_output_path(line, stored_path, project)
                 st.caption("出力対象" if is_output else "候補")
                 if st.button("出力対象にする", key=f"gallery_output_{line.id}_{index}"):
                     set_candidate_as_after(line, stored_path)
@@ -982,7 +999,7 @@ def render_illustration_selection_mode(project) -> None:
                 st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
             st.rerun()
     with bottom_cols[1]:
-        if st.button("通常表示に戻る", key="gallery_exit_bottom"):
+        if st.button("全体編集モードへ", key="gallery_exit_bottom"):
             st.session_state.selection_mode_enabled = False
             st.rerun()
 
@@ -2034,17 +2051,20 @@ st.caption("プロジェクト作成 -> 既存イラスト集の読み込み -> 
 mode_cols = st.columns([1, 3])
 with mode_cols[0]:
     if st.session_state.selection_mode_enabled:
-        if st.button("通常表示に戻る", key="selection_mode_exit_top"):
+        if st.button("全体編集モードへ", key="selection_mode_exit_top"):
             st.session_state.selection_mode_enabled = False
             st.rerun()
     else:
-        if st.button("ギャラリー編集モード", type="primary", key="selection_mode_enter"):
+        if st.button("ギャラリー編集モードへ", type="primary", key="selection_mode_enter"):
             st.session_state.selection_mode_enabled = True
             st.session_state.focused_line_id = None
             st.session_state.selected_node_ids = []
             st.rerun()
 with mode_cols[1]:
-    st.caption("ギャラリー編集モードでは、画像を見ながら並び替え・削除候補選別・生成ソース編集・単発生成ができます。")
+    if st.session_state.selection_mode_enabled:
+        st.caption("画像を見ながら並び替え・削除候補選別・生成ソース編集・候補管理を行います。")
+    else:
+        st.caption("グラフやPromptCloudで、イラスト集全体の生成ソース構造を確認・編集します。")
 
 if st.session_state.selection_mode_enabled:
     render_illustration_selection_mode(project)
