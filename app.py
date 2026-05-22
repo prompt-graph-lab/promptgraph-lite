@@ -804,7 +804,7 @@ def render_gallery_line_editor(line, project) -> None:
         "生成ソース（プロンプト）を直接編集",
         value=getattr(line, "current_text", "") or "",
         key=f"gallery_text_{line.id}",
-        height=120,
+        height=240,
     )
     action_cols = st.columns([1, 1, 2])
     with action_cols[0]:
@@ -820,11 +820,11 @@ def render_gallery_line_editor(line, project) -> None:
 
     candidate_items = get_line_candidate_items(line, project)
     if candidate_items:
-        st.caption("候補イラスト")
-        candidate_cols = st.columns(2)
+        st.caption("候補イラストをこのブロックに蓄積します。")
+        candidate_cols = st.columns(4)
         for index, (stored_path, resolved_path) in enumerate(candidate_items[:4]):
-            with candidate_cols[index % 2]:
-                st.image(resolved_path, width="stretch")
+            with candidate_cols[index % 4]:
+                st.image(resolved_path, width=160)
                 is_output = stored_path == getattr(line, "selected_candidate_path", None) or stored_path == getattr(line, "generated_image_path", None)
                 st.caption("出力対象" if is_output else "候補")
                 if st.button("出力対象にする", key=f"gallery_output_{line.id}_{index}"):
