@@ -74,6 +74,10 @@ if "autosave_feedback" not in st.session_state:
     st.session_state.autosave_feedback = ""
 if "pending_focus_action" not in st.session_state:
     st.session_state.pending_focus_action = None
+if "selection_mode_enabled" not in st.session_state:
+    st.session_state.selection_mode_enabled = False
+if "selection_mode_delete_candidates" not in st.session_state:
+    st.session_state.selection_mode_delete_candidates = {}
 
 def _saved_time_label() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -568,6 +572,7 @@ def delete_lines(line_ids) -> int:
     # Check if selected nodes still exist
     st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
     st.session_state.selected_lines = {}
+    st.session_state.selection_mode_delete_candidates = {}
     autosave_current_project("イラストを削除")
     return deleted_count
 
@@ -692,6 +697,67 @@ def get_line_thumbnail_path(line, project=None) -> str:
         if existing_path:
             return existing_path
     return ""
+
+def render_illustration_selection_mode(project) -> None:
+    active_lines = [line for line in project.prompt_lines if not getattr(line, "deleted", False)]
+    active_ids = {line.id for line in active_lines}
+    candidates = st.session_state.get("selection_mode_delete_candidates", {})
+    if not isinstance(candidates, dict):
+        candidates = {}
+    candidates = {line_id: bool(value) for line_id, value in candidates.items() if line_id in active_ids}
+    for line in active_lines:
+        widget_key = f"selection_mode_delete_{line.id}"
+        if widget_key in st.session_state:
+            candidates[line.id] = bool(st.session_state[widget_key])
+    st.session_state.selection_mode_delete_candidates = candidates
+
+    delete_candidate_ids = [line_id for line_id, selected in candidates.items() if selected]
+    st.subheader("画像選別モード")
+    st.caption("大量のイラストを軽く確認し、不要なものを削除候補としてまとめて除外できます。")
+    top_left, top_right = st.columns([1, 1])
+    with top_left:
+        st.write(f"削除候補: {len(delete_candidate_ids)}件")
+        st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
+    with top_right:
+        if st.button("通常表示に戻る", type="secondary"):
+            st.session_state.selection_mode_enabled = False
+            st.rerun()
+
+    if st.button("削除候補をまとめて削除", type="primary", disabled=not delete_candidate_ids):
+        deleted_count = delete_lines(delete_candidate_ids)
+        st.session_state.selection_mode_delete_candidates = {}
+        if deleted_count:
+            st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
+        st.rerun()
+
+    st.write("---")
+    if not active_lines:
+        st.info("表示できるイラストがありません。")
+        return
+
+    for row_start in range(0, len(active_lines), 4):
+        cols = st.columns(4)
+        for offset, col in enumerate(cols):
+            line_index = row_start + offset
+            if line_index >= len(active_lines):
+                continue
+            line = active_lines[line_index]
+            with col:
+                thumbnail_path = get_line_thumbnail_path(line, project)
+                if thumbnail_path:
+                    st.image(thumbnail_path, width="stretch")
+                else:
+                    st.info("画像なし")
+                st.caption(f"{line.current_index + 1:04d} / {line.original_file_name}")
+                prompt_preview = " ".join((getattr(line, "current_text", "") or "").split())
+                if prompt_preview:
+                    st.caption(prompt_preview[:80] + ("..." if len(prompt_preview) > 80 else ""))
+                checked = st.checkbox(
+                    "削除候補",
+                    value=bool(candidates.get(line.id, False)),
+                    key=f"selection_mode_delete_{line.id}",
+                )
+                st.session_state.selection_mode_delete_candidates[line.id] = checked
 
 def count_line_candidates(line) -> int:
     candidate_paths = []
@@ -1725,6 +1791,25 @@ if project:
 
 st.title("PromptGraph Lite")
 st.caption("プロジェクト作成 -> 既存イラスト集の読み込み -> 生成ソース（プロンプト）の編集 -> 差分作成・継続 -> 保存・出力")
+
+mode_cols = st.columns([1, 3])
+with mode_cols[0]:
+    if st.session_state.selection_mode_enabled:
+        if st.button("通常表示に戻る", key="selection_mode_exit_top"):
+            st.session_state.selection_mode_enabled = False
+            st.rerun()
+    else:
+        if st.button("画像選別モード", type="primary", key="selection_mode_enter"):
+            st.session_state.selection_mode_enabled = True
+            st.session_state.focused_line_id = None
+            st.session_state.selected_node_ids = []
+            st.rerun()
+with mode_cols[1]:
+    st.caption("画像選別モードでは、サムネイルを見ながら削除候補だけをまとめて選べます。")
+
+if st.session_state.selection_mode_enabled:
+    render_illustration_selection_mode(project)
+    st.stop()
 
 col1, col2 = st.columns([1, 1])
 
