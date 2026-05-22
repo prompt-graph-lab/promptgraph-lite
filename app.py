@@ -1248,6 +1248,8 @@ if st.sidebar.button(
         )
         if import_summary.get("warnings"):
             st.sidebar.warning(f"警告: {len(import_summary['warnings'])}件のPNGを確認してください。")
+        if line_summary.get("path_warning_count"):
+            st.sidebar.warning(f"読み込みフォルダ外の画像パスを検出しました: {line_summary['path_warning_count']}件")
         if line_summary["created_count"] == 0:
             st.sidebar.info("生成ソース（プロンプト）を復元できるPNGメタデータが見つかりませんでした。")
     else:

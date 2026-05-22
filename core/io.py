@@ -529,6 +529,7 @@ def scan_image_directory_metadata(source_directory: str) -> dict:
             image_info = {
                 "path": image_path,
                 "current_path": image_path,
+                "scan_root": os.path.abspath(root),
                 "filename": file_name,
                 "extension": extension,
                 "size_bytes": stat.st_size,
@@ -582,14 +583,46 @@ def _latest_image_metadata_import(project: Project) -> dict | None:
 def _image_import_prompt_text(image_info: dict) -> str:
     return str(image_info.get("prompt_text") or image_info.get("prompt_preview") or "").strip()
 
-def _current_import_image_path(image_info: dict) -> str:
-    return str(image_info.get("current_path") or image_info.get("path") or "").strip()
+def _is_path_under_directory(path: str, directory: str) -> bool:
+    if not path or not directory:
+        return False
+    try:
+        normalized_path = os.path.normcase(os.path.abspath(os.path.expanduser(path)))
+        normalized_directory = os.path.normcase(os.path.abspath(os.path.expanduser(directory)))
+        return os.path.commonpath([normalized_path, normalized_directory]) == normalized_directory
+    except (OSError, ValueError):
+        return False
 
 def _current_import_file_name(image_info: dict) -> str:
-    current_path = _current_import_image_path(image_info)
-    if current_path:
-        return os.path.basename(current_path)
-    return str(image_info.get("filename") or "image").strip() or "image"
+    file_name = str(image_info.get("filename") or "").strip()
+    if file_name:
+        return os.path.basename(file_name)
+    for key in ("current_path", "path"):
+        path = str(image_info.get(key) or "").strip()
+        if path:
+            return os.path.basename(path)
+    return "image"
+
+def _current_import_image_path(image_info: dict, source_directory: str) -> tuple[str, str]:
+    file_name = _current_import_file_name(image_info)
+    if source_directory and file_name:
+        source_file_path = os.path.abspath(os.path.join(source_directory, file_name))
+        if os.path.exists(source_file_path):
+            return source_file_path, ""
+
+    for key in ("current_path", "path"):
+        path = str(image_info.get(key) or "").strip()
+        if not path:
+            continue
+        path = os.path.abspath(os.path.expanduser(path))
+        if os.path.exists(path):
+            warning = "" if _is_path_under_directory(path, source_directory) else f"Imported image path is outside source directory: {path}"
+            return path, warning
+
+    if source_directory and file_name:
+        return os.path.abspath(os.path.join(source_directory, file_name)), ""
+    return "", ""
+
 
 def summarize_image_metadata_line_import(project: Project) -> dict:
     latest_import = _latest_image_metadata_import(project)
@@ -627,6 +660,9 @@ def create_prompt_lines_from_latest_image_import(project: Project) -> tuple[Proj
     sequence = 1
     created_count = 0
     skipped_count = 0
+    path_warning_count = 0
+    path_warnings = []
+    source_directory = str(latest_import.get("source_directory") or getattr(project, "source_directory", "") or "").strip()
 
     for image_info in latest_import.get("images", []):
         if not isinstance(image_info, dict):
@@ -640,7 +676,10 @@ def create_prompt_lines_from_latest_image_import(project: Project) -> tuple[Proj
 
         line_index = start_index + created_count
         line_id, sequence = _next_image_metadata_line_id(existing_ids, sequence)
-        current_image_path = _current_import_image_path(image_info)
+        current_image_path, path_warning = _current_import_image_path(image_info, source_directory)
+        if path_warning:
+            path_warning_count += 1
+            path_warnings.append(path_warning)
         prompt_line = PromptLine(
             id=line_id,
             original_file_name=_current_import_file_name(image_info),
@@ -659,6 +698,8 @@ def create_prompt_lines_from_latest_image_import(project: Project) -> tuple[Proj
     return project, {
         "created_count": created_count,
         "skipped_count": skipped_count,
+        "path_warning_count": path_warning_count,
+        "path_warnings": path_warnings,
         "has_import": True,
     }
 
