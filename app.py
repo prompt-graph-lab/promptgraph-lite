@@ -1282,6 +1282,29 @@ with st.sidebar.expander("イラスト・生成ソースセット出力", expand
         value=st.session_state.settings.get("last_export_include_kind_label", True),
         key="export_prompt_image_include_kind_label",
     )
+    st.markdown("##### 公開用安全化")
+    st.caption("PNG画像には、生成環境やローカルフォルダ情報が含まれている場合があります。")
+    st.caption("公開用イラスト集では、メタデータ削除を推奨します。")
+    strip_metadata = st.checkbox(
+        "PNGメタデータを削除（推奨）",
+        value=st.session_state.settings.get("last_export_strip_metadata", True),
+        key="export_prompt_image_strip_metadata",
+    )
+    include_prompt_metadata = st.checkbox(
+        "生成ソース（プロンプト）をPNGに埋め込む",
+        value=st.session_state.settings.get("last_export_include_prompt_metadata", False),
+        key="export_prompt_image_include_prompt_metadata",
+    )
+    include_workflow_metadata = st.checkbox(
+        "ComfyUI workflowを保持",
+        value=st.session_state.settings.get("last_export_include_workflow_metadata", False),
+        key="export_prompt_image_include_workflow_metadata",
+    )
+    include_environment_metadata = st.checkbox(
+        "制作環境情報を保持",
+        value=st.session_state.settings.get("last_export_include_environment_metadata", False),
+        key="export_prompt_image_include_environment_metadata",
+    )
     if st.button("イラスト・生成ソースセットを出力", key="export_prompt_image_set"):
         if st.session_state.project:
             summary = export_prompt_image_set(
@@ -1290,15 +1313,27 @@ with st.sidebar.expander("イラスト・生成ソースセット出力", expand
                 disabled_modules=st.session_state.disabled_modules,
                 filename_prefix=export_filename_prefix,
                 include_kind_label=include_kind_label,
+                strip_metadata=strip_metadata,
+                include_prompt_metadata=include_prompt_metadata,
+                include_workflow_metadata=include_workflow_metadata,
+                include_environment_metadata=include_environment_metadata,
             )
             st.session_state.settings["last_export_set_directory"] = export_set_dir
             st.session_state.settings["last_export_filename_prefix"] = export_filename_prefix
             st.session_state.settings["last_export_include_kind_label"] = include_kind_label
+            st.session_state.settings["last_export_strip_metadata"] = strip_metadata
+            st.session_state.settings["last_export_include_prompt_metadata"] = include_prompt_metadata
+            st.session_state.settings["last_export_include_workflow_metadata"] = include_workflow_metadata
+            st.session_state.settings["last_export_include_environment_metadata"] = include_environment_metadata
             save_settings(st.session_state.settings)
             st.sidebar.success(
                 f"出力成功: 生成ソース {summary['prompt_count']}件 / "
                 f"画像 {summary['image_count']}件 -> {summary['output_dir']}"
             )
+            if summary["metadata_stripped_count"]:
+                st.sidebar.info(f"PNGメタデータを削除しました: {summary['metadata_stripped_count']}件")
+            if summary["metadata_written_count"]:
+                st.sidebar.info(f"PNGメタデータを書き込みました: {summary['metadata_written_count']}件")
             if summary["missing_image_count"]:
                 st.sidebar.warning(
                     f"画像が存在しないためプロンプトのみ出力: {summary['missing_image_count']}件"
