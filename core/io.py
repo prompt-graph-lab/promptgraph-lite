@@ -904,6 +904,12 @@ def _save_export_image(
     include_workflow_metadata: bool = False,
     include_environment_metadata: bool = False,
 ) -> str:
+    source_extension = os.path.splitext(image_path)[1].lower()
+    output_extension = os.path.splitext(output_image_path)[1].lower()
+    if source_extension != ".png" or output_extension != ".png":
+        shutil.copy2(image_path, output_image_path)
+        return "copied"
+
     should_resave = (
         strip_metadata
         or include_prompt_metadata
@@ -921,24 +927,22 @@ def _save_export_image(
         shutil.copy2(image_path, output_image_path)
         return "copied"
 
-    extension = os.path.splitext(output_image_path)[1].lower()
     with Image.open(image_path) as image:
         save_kwargs = {}
-        if extension == ".png":
-            pnginfo = PngInfo()
-            source_metadata = _text_metadata_items(getattr(image, "info", {}))
-            if include_prompt_metadata and prompt_text:
-                pnginfo.add_text("PromptGraphPrompt", prompt_text)
-            if include_workflow_metadata:
-                for key, value in source_metadata.items():
-                    if _is_workflow_metadata_key(key):
-                        pnginfo.add_text(key, value)
-            if include_environment_metadata:
-                for key, value in source_metadata.items():
-                    if key == "PromptGraphPrompt" or _is_workflow_metadata_key(key):
-                        continue
+        pnginfo = PngInfo()
+        source_metadata = _text_metadata_items(getattr(image, "info", {}))
+        if include_prompt_metadata and prompt_text:
+            pnginfo.add_text("PromptGraphPrompt", prompt_text)
+        if include_workflow_metadata:
+            for key, value in source_metadata.items():
+                if _is_workflow_metadata_key(key):
                     pnginfo.add_text(key, value)
-            save_kwargs["pnginfo"] = pnginfo
+        if include_environment_metadata:
+            for key, value in source_metadata.items():
+                if key == "PromptGraphPrompt" or _is_workflow_metadata_key(key):
+                    continue
+                pnginfo.add_text(key, value)
+        save_kwargs["pnginfo"] = pnginfo
         image.save(output_image_path, format=image.format, **save_kwargs)
     return "resaved"
 
