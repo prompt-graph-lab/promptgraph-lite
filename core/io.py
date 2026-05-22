@@ -882,12 +882,80 @@ def _selected_export_image(project: Project, line: PromptLine) -> tuple[str, str
             return image_kind, resolved_path
     return "", ""
 
+def _text_metadata_items(metadata: dict) -> dict:
+    text_items = {}
+    for key, value in (metadata or {}).items():
+        if isinstance(value, str):
+            text_items[str(key)] = value
+        elif isinstance(value, (int, float, bool)):
+            text_items[str(key)] = str(value)
+    return text_items
+
+def _is_workflow_metadata_key(key: str) -> bool:
+    lowered_key = key.lower()
+    return lowered_key in {"workflow", "prompt"} or "workflow" in lowered_key
+
+def _save_export_image(
+    image_path: str,
+    output_image_path: str,
+    prompt_text: str,
+    strip_metadata: bool = True,
+    include_prompt_metadata: bool = False,
+    include_workflow_metadata: bool = False,
+    include_environment_metadata: bool = False,
+) -> str:
+    source_extension = os.path.splitext(image_path)[1].lower()
+    output_extension = os.path.splitext(output_image_path)[1].lower()
+    if source_extension != ".png" or output_extension != ".png":
+        shutil.copy2(image_path, output_image_path)
+        return "copied"
+
+    should_resave = (
+        strip_metadata
+        or include_prompt_metadata
+        or include_workflow_metadata
+        or include_environment_metadata
+    )
+    if not should_resave:
+        shutil.copy2(image_path, output_image_path)
+        return "copied"
+
+    try:
+        from PIL import Image
+        from PIL.PngImagePlugin import PngInfo
+    except ImportError:
+        shutil.copy2(image_path, output_image_path)
+        return "copied"
+
+    with Image.open(image_path) as image:
+        save_kwargs = {}
+        pnginfo = PngInfo()
+        source_metadata = _text_metadata_items(getattr(image, "info", {}))
+        if include_prompt_metadata and prompt_text:
+            pnginfo.add_text("PromptGraphPrompt", prompt_text)
+        if include_workflow_metadata:
+            for key, value in source_metadata.items():
+                if _is_workflow_metadata_key(key):
+                    pnginfo.add_text(key, value)
+        if include_environment_metadata:
+            for key, value in source_metadata.items():
+                if key == "PromptGraphPrompt" or _is_workflow_metadata_key(key):
+                    continue
+                pnginfo.add_text(key, value)
+        save_kwargs["pnginfo"] = pnginfo
+        image.save(output_image_path, format=image.format, **save_kwargs)
+    return "resaved"
+
 def export_prompt_image_set(
     project: Project,
     output_dir: str,
     disabled_modules: set = None,
     filename_prefix: str = "illustration",
     include_kind_label: bool = True,
+    strip_metadata: bool = True,
+    include_prompt_metadata: bool = False,
+    include_workflow_metadata: bool = False,
+    include_environment_metadata: bool = False,
 ) -> dict:
     if disabled_modules is None:
         disabled_modules = set()
@@ -901,12 +969,15 @@ def export_prompt_image_set(
 
     copied_images = []
     missing_images = []
+    stripped_images = 0
+    metadata_images = 0
     valid_lines = [line for line in project.prompt_lines if not line.deleted]
 
     with open(prompts_path, "w", encoding="utf-8") as prompt_file:
         for index, line in enumerate(valid_lines, start=1):
             active = get_active_tokens(line, disabled_modules)
-            prompt_file.write(f"{', '.join(active)}\n")
+            prompt_text = ", ".join(active)
+            prompt_file.write(f"{prompt_text}\n")
 
             image_kind, image_path = _selected_export_image(project, line)
             if not image_path:
@@ -919,7 +990,19 @@ def export_prompt_image_set(
             else:
                 image_file_name = f"{index:04d}_{safe_prefix}{extension}"
             output_image_path = os.path.join(export_dir, image_file_name)
-            shutil.copy2(image_path, output_image_path)
+            export_mode = _save_export_image(
+                image_path,
+                output_image_path,
+                prompt_text,
+                strip_metadata=strip_metadata,
+                include_prompt_metadata=include_prompt_metadata,
+                include_workflow_metadata=include_workflow_metadata,
+                include_environment_metadata=include_environment_metadata,
+            )
+            if export_mode == "resaved" and strip_metadata:
+                stripped_images += 1
+            if include_prompt_metadata or include_workflow_metadata or include_environment_metadata:
+                metadata_images += 1
             copied_images.append(output_image_path)
 
     return {
@@ -928,6 +1011,8 @@ def export_prompt_image_set(
         "prompt_count": len(valid_lines),
         "image_count": len(copied_images),
         "missing_image_count": len(missing_images),
+        "metadata_stripped_count": stripped_images,
+        "metadata_written_count": metadata_images,
         "copied_images": copied_images,
         "missing_line_ids": missing_images,
         "used_fallback_directory": os.path.abspath(os.path.expanduser(output_dir)) != export_dir,
