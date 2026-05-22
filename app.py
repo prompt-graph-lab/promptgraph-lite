@@ -693,7 +693,7 @@ def validate_lite_module_text_edit(old_text: str, new_text: str) -> bool:
     st.error("Lite版ではModuleタグの追加・削除・変更はできません。")
     return False
 
-def process_pending_gallery_action() -> None:
+def process_pending_gallery_action(show_inline_progress: bool = False) -> None:
     pending = st.session_state.get("pending_gallery_action")
     if not isinstance(pending, dict):
         return
@@ -736,6 +736,8 @@ def process_pending_gallery_action() -> None:
         workflow_json = build_lite_generation_workflow(target_line)
         output_dir = get_generated_output_dir(st.session_state.project)
         os.makedirs(output_dir, exist_ok=True)
+        if show_inline_progress:
+            st.caption("ComfyUIで単発生成中です。生成状況はこの編集パネル内に表示します。")
         progress_bar = st.progress(0.0)
         status_text = st.empty()
         gen_path = None
@@ -790,7 +792,7 @@ def get_line_candidate_items(line, project=None) -> list[tuple[str, str]]:
     seen = set()
     for candidate in reversed(list(_get_line_generated_candidates(line))):
         candidate_path = _candidate_path(candidate)
-        identity = _candidate_identity_path(candidate_path)
+        identity = _candidate_identity_path(candidate_path, project)
         if not candidate_path or identity in seen:
             continue
         resolved_path = _existing_project_image_path(candidate_path, project)
@@ -811,7 +813,7 @@ def validate_manual_candidate_path(image_path: str, project=None) -> tuple[str, 
     resolved_path = _existing_project_image_path(clean_path, project)
     if not resolved_path:
         return "", "画像ファイルが見つかりません。パスを確認してください。"
-    return clean_path, ""
+    return resolved_path, ""
 
 def render_gallery_line_editor(line, project) -> None:
     st.markdown(f"#### 編集: `{line.original_file_name}`")
@@ -862,9 +864,9 @@ def render_gallery_line_editor(line, project) -> None:
                 st.warning(error)
             else:
                 existing_candidates = _get_line_generated_candidates(line)
-                candidate_identity = _candidate_identity_path(candidate_path)
+                candidate_identity = _candidate_identity_path(candidate_path, project)
                 already_exists = any(
-                    _candidate_identity_path(_candidate_path(candidate)) == candidate_identity
+                    _candidate_identity_path(_candidate_path(candidate), project) == candidate_identity
                     for candidate in existing_candidates
                 )
                 if already_exists:
@@ -923,6 +925,9 @@ def render_illustration_selection_mode(project) -> None:
         st.info("表示できるイラストがありません。")
         return
 
+    pending_gallery_action = st.session_state.get("pending_gallery_action")
+    if isinstance(pending_gallery_action, dict) and pending_gallery_action.get("line_id") in active_ids:
+        st.session_state.gallery_expanded_line_id = pending_gallery_action.get("line_id")
     expanded_line_id = st.session_state.get("gallery_expanded_line_id")
     for row_start in range(0, len(active_lines), 4):
         row_lines = active_lines[row_start: row_start + 4]
@@ -961,6 +966,15 @@ def render_illustration_selection_mode(project) -> None:
         row_expanded = next((line for line in row_lines if line.id == st.session_state.get("gallery_expanded_line_id")), None)
         if row_expanded:
             with st.container(border=True):
+                process_pending_gallery_action(show_inline_progress=True)
+                project = st.session_state.project
+                row_expanded = next(
+                    (
+                        line for line in project.prompt_lines
+                        if line.id == st.session_state.get("gallery_expanded_line_id")
+                    ),
+                    row_expanded,
+                )
                 render_gallery_line_editor(row_expanded, project)
                 st.caption("将来のルート分岐UIでは、分岐イラストの直前にAルート / Bルートの選択ブロックを置ける構造にします。")
 
@@ -1197,10 +1211,13 @@ def _candidate_path(candidate):
         return str(candidate.get("path") or "")
     return str(candidate) if candidate else ""
 
-def _candidate_identity_path(path: str) -> str:
+def _candidate_identity_path(path: str, project=None) -> str:
     if not path:
         return ""
-    return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+    identity_path = _existing_project_image_path(path, project) if project else ""
+    if not identity_path:
+        identity_path = str(path)
+    return os.path.normcase(os.path.abspath(os.path.expanduser(identity_path)))
 
 def _normalize_candidate_record(candidate):
     if isinstance(candidate, dict):
@@ -2013,7 +2030,8 @@ st.session_state.comfy_workflow_path = st.sidebar.text_input("workflow_api.json�
 project = st.session_state.project
 if project:
     process_pending_focus_action()
-    process_pending_gallery_action()
+    if not st.session_state.selection_mode_enabled:
+        process_pending_gallery_action()
     project = st.session_state.project
 
 st.title("PromptGraph Lite")
