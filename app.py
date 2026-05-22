@@ -833,6 +833,34 @@ def render_gallery_line_editor(line, project) -> None:
     else:
         st.caption("候補イラストはまだありません。")
 
+    st.markdown("##### 候補イラストを追加")
+    manual_candidate_path = st.text_input(
+        "画像ファイルパス",
+        key=f"gallery_manual_candidate_path_{line.id}",
+        placeholder="D:\\path\\to\\generated.png",
+    )
+    add_col, add_output_col = st.columns(2)
+    with add_col:
+        if st.button("候補として追加", key=f"gallery_add_candidate_{line.id}"):
+            resolved_path = _existing_project_image_path(manual_candidate_path, project)
+            if not resolved_path:
+                st.warning("画像ファイルが見つかりません。パスを確認してください。")
+            else:
+                push_history()
+                add_candidate_image(line, manual_candidate_path)
+                autosave_current_project("候補イラストを手動追加")
+                st.success("候補イラストを追加しました。")
+                st.rerun()
+    with add_output_col:
+        if st.button("追加して出力対象にする", key=f"gallery_add_candidate_output_{line.id}"):
+            resolved_path = _existing_project_image_path(manual_candidate_path, project)
+            if not resolved_path:
+                st.warning("画像ファイルが見つかりません。パスを確認してください。")
+            else:
+                set_candidate_as_after(line, manual_candidate_path)
+                st.success("候補イラストを追加し、出力対象に設定しました。")
+                st.rerun()
+
 def render_illustration_selection_mode(project) -> None:
     active_lines = [line for line in project.prompt_lines if not getattr(line, "deleted", False)]
     active_ids = {line.id for line in active_lines}
