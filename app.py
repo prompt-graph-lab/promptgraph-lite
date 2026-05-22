@@ -1,6 +1,6 @@
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
-from core.io import load_directory, export_to_txt, export_prompt_image_set, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import, create_project_workspace, ensure_project_folder_layout, project_dir_from_path, resolve_project_image_path, image_path_resolution_attempts
+from core.io import load_directory, export_to_txt, export_prompt_image_set, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import, create_project_workspace, ensure_project_folder_layout, project_dir_from_path, resolve_project_image_path, image_path_resolution_attempts, find_image_metadata_for_line
 from core.graph_builder import build_graph
 from core.operations import rename_node, delete_nodes, insert_node, duplicate_nodes, move_nodes, merge_duplicates_in_line, merge_duplicates_all_lines, apply_node_weight, insert_subgraph, replace_with_subgraph, rename_word_global, delete_word_global, insert_word_global, count_matches, get_available_modules, get_active_tokens, get_display_tokens, get_display_tokens_from_text, extract_module_structure_from_text
 from core.parser import parse_prompt
@@ -72,6 +72,8 @@ if "last_saved_at" not in st.session_state:
     st.session_state.last_saved_at = ""
 if "autosave_feedback" not in st.session_state:
     st.session_state.autosave_feedback = ""
+if "pending_focus_action" not in st.session_state:
+    st.session_state.pending_focus_action = None
 
 def _saved_time_label() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -181,7 +183,7 @@ def create_new_project_workspace(parent_dir: str, project_name: str) -> tuple[bo
     st.session_state.last_saved_at = _saved_time_label()
     st.session_state.autosave_feedback = "自動保存: 有効"
     generated_dir = folders.get("generated") or os.path.join(project_root, "generated")
-    return True, f"project.jsonを作成しました。generatedフォルダを作成しました: {generated_dir}"
+    return True, f"プロジェクトフォルダを作成しました: {project_root}\nproject.jsonとgeneratedフォルダを作成しました: {generated_dir}"
 
 def get_generated_output_dir(project) -> str:
     source_directory = getattr(project, "source_directory", "") if project else ""
@@ -624,6 +626,27 @@ def continue_story_from_line(line_id: str) -> str | None:
     autosave_current_project("このルートの次のイラストを作成")
     return new_line_id
 
+def request_focus_action(action: str, line_id: str) -> None:
+    st.session_state.pending_focus_action = {"action": action, "line_id": line_id}
+
+def process_pending_focus_action() -> None:
+    pending = st.session_state.get("pending_focus_action")
+    if not isinstance(pending, dict):
+        return
+    st.session_state.pending_focus_action = None
+    action = pending.get("action")
+    line_id = pending.get("line_id")
+    if action == "branch":
+        new_line_id = duplicate_line(line_id, focus_new_branch=True)
+        if new_line_id:
+            st.session_state.branch_feedback = "差分イラストを作成しました。"
+            st.rerun()
+    elif action == "continue":
+        new_line_id = continue_story_from_line(line_id)
+        if new_line_id:
+            st.session_state.branch_feedback = "このルートの次のイラストを作成しました。"
+            st.rerun()
+
 def get_candidate_image_paths(line) -> list[str]:
     return [_candidate_path(candidate) for candidate in _get_line_generated_candidates(line)]
 
@@ -718,6 +741,43 @@ def _is_executable_comfy_workflow(value) -> bool:
         for node in nodes.values()
     )
 
+def _workflow_text_from_line_metadata(project, line):
+    image_metadata = find_image_metadata_for_line(project, line)
+    raw_metadata = (image_metadata or {}).get("raw_metadata", {})
+    if not isinstance(raw_metadata, dict):
+        return "", "", image_metadata
+
+    lowered_metadata = {str(key).lower(): value for key, value in raw_metadata.items()}
+    for key in ("prompt", "workflow"):
+        workflow_text = lowered_metadata.get(key)
+        workflow_json = _load_json_from_text(workflow_text) if isinstance(workflow_text, str) else None
+        if _is_executable_comfy_workflow(workflow_json):
+            return workflow_text, f"PNGメタデータ `{key}`", image_metadata
+    return "", "", image_metadata
+
+def _workflow_metadata_status(project, line):
+    workflow_text, workflow_label, image_metadata = _workflow_text_from_line_metadata(project, line)
+    raw_metadata = (image_metadata or {}).get("raw_metadata", {})
+    raw_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+    has_prompt = "prompt" in {str(key).lower() for key in raw_metadata}
+    has_workflow = "workflow" in {str(key).lower() for key in raw_metadata}
+    shared_path = st.session_state.get("comfy_workflow_path") or st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json")
+    shared_exists = bool(shared_path and os.path.exists(shared_path))
+    if workflow_text:
+        selected = f"埋め込みPNG workflowを使用: {workflow_label}"
+    elif shared_exists:
+        selected = "共有workflow_api.jsonを使用"
+    else:
+        selected = "実行可能なworkflowが見つかりません"
+    return {
+        "embedded_found": has_prompt or has_workflow,
+        "embedded_executable": bool(workflow_text),
+        "workflow_label": workflow_label,
+        "shared_path": shared_path,
+        "shared_exists": shared_exists,
+        "selected": selected,
+    }
+
 def _is_regular_comfy_ui_workflow(value) -> bool:
     if not isinstance(value, dict):
         return False
@@ -731,7 +791,7 @@ def _validate_api_comfy_workflow(workflow_json):
     if not _is_executable_comfy_workflow(workflow_json):
         raise ValueError("workflow JSONがComfyUI API形式ではないか、ノード入力がありません。")
 
-def _replace_clip_text_prompts(workflow_json, line):
+def _replace_clip_text_prompts(workflow_json, line, image_metadata=None):
     if not isinstance(workflow_json, dict):
         return 0
 
@@ -739,6 +799,10 @@ def _replace_clip_text_prompts(workflow_json, line):
     if not isinstance(nodes, dict):
         return 0
 
+    current_positive = getattr(line, "current_text", "") or ""
+    current_negative = getattr(line, "negative_prompt", "") or ""
+    imported_positive = (image_metadata or {}).get("prompt_text") or ""
+    imported_negative = (image_metadata or {}).get("negative_prompt") or ""
     replacements = 0
     clip_inputs = []
     for node in nodes.values():
@@ -751,9 +815,23 @@ def _replace_clip_text_prompts(workflow_json, line):
             clip_inputs.append(inputs)
 
     for inputs in clip_inputs:
-        if inputs.get("text"):
-            inputs["text"] = getattr(line, "current_text", "") or ""
+        text = inputs.get("text", "")
+        if imported_positive and text == imported_positive:
+            inputs["text"] = current_positive
             replacements += 1
+        elif imported_negative and text == imported_negative:
+            inputs["text"] = current_negative
+            replacements += 1
+
+    if replacements == 0 and not image_metadata:
+        for inputs in clip_inputs:
+            if inputs.get("text"):
+                inputs["text"] = current_positive
+                replacements += 1
+
+    if replacements == 0 and len(clip_inputs) == 1:
+        clip_inputs[0]["text"] = current_positive
+        replacements += 1
 
     return replacements
 
@@ -843,13 +921,7 @@ def set_candidate_as_reference(line, image_path: str):
     line.image_path = image_path
     autosave_current_project("候補を元のイラストに設定")
 
-def build_lite_generation_workflow(target_line):
-    if not os.path.exists(st.session_state.comfy_workflow_path):
-        raise FileNotFoundError(f"workflow JSONが見つかりません: {st.session_state.comfy_workflow_path}")
-
-    with open(st.session_state.comfy_workflow_path, 'r', encoding='utf-8') as f:
-        wf_str = f.read()
-
+def _build_lite_workflow_from_text(workflow_text, target_line, image_metadata=None):
     mapping = st.session_state.settings.get("comfy_mapping")
     fallback_prompt = st.session_state.settings.get("fallback_prompt", "(masterpiece:1.0)")
     active_tokens = get_active_tokens(target_line, st.session_state.disabled_modules, fallback_prompt=fallback_prompt)
@@ -857,29 +929,43 @@ def build_lite_generation_workflow(target_line):
     injection_line.current_text = ", ".join(active_tokens)
 
     if isinstance(mapping, dict) and "group_map" in mapping:
-        workflow_json = json.loads(wf_str)
+        workflow_json = json.loads(workflow_text)
         _validate_api_comfy_workflow(workflow_json)
         from core.comfyui import build_prompt_by_group, inject_prompt_to_workflow
         grouped = build_prompt_by_group(st.session_state.project, target_line, st.session_state.disabled_modules)
         return inject_prompt_to_workflow(workflow_json, grouped, mapping, fallback_prompt=fallback_prompt)
 
-    if "__PROMPT__" not in wf_str:
-        workflow_json = json.loads(wf_str)
+    if "__PROMPT__" not in workflow_text:
+        workflow_json = json.loads(workflow_text)
         _validate_api_comfy_workflow(workflow_json)
-        if _replace_clip_text_prompts(workflow_json, injection_line) == 0:
+        if _replace_clip_text_prompts(workflow_json, injection_line, image_metadata=image_metadata) == 0:
             st.warning("workflow JSONに'__PROMPT__'がありません。プロンプトが反映されない可能性があります。")
         return workflow_json
 
     escaped_prompt = json.dumps(", ".join(active_tokens))[1:-1]
-    workflow_json = json.loads(wf_str.replace("__PROMPT__", escaped_prompt))
+    workflow_json = json.loads(workflow_text.replace("__PROMPT__", escaped_prompt))
     _validate_api_comfy_workflow(workflow_json)
     return workflow_json
 
+def build_lite_generation_workflow(target_line):
+    workflow_text, _workflow_label, image_metadata = _workflow_text_from_line_metadata(st.session_state.project, target_line)
+    if not workflow_text:
+        if not os.path.exists(st.session_state.comfy_workflow_path):
+            raise FileNotFoundError(f"workflow JSONが見つかりません: {st.session_state.comfy_workflow_path}")
+        with open(st.session_state.comfy_workflow_path, 'r', encoding='utf-8') as f:
+            workflow_text = f.read()
+    return _build_lite_workflow_from_text(workflow_text, target_line, image_metadata=image_metadata)
+
 def render_lite_comfy_workflow_debug_preview(target_line):
     with st.expander("Debug: ComfyUI workflowプレビュー", expanded=False):
+        status = _workflow_metadata_status(st.session_state.project, target_line)
+        st.caption("workflowソース状態")
+        st.markdown(f"- embedded PNG workflow found: {'yes' if status['embedded_found'] else 'no'}")
+        st.markdown(f"- executable embedded workflow: {'yes' if status['embedded_executable'] else 'no'}")
+        st.markdown(f"- selected source: {status['selected']}")
         st.caption("共有workflow JSONパス")
-        st.code(st.session_state.comfy_workflow_path or "(not set)", language="text")
-        if not os.path.exists(st.session_state.comfy_workflow_path):
+        st.code(status["shared_path"] or "(not set)", language="text")
+        if not status["embedded_executable"] and not status["shared_exists"]:
             st.warning(f"workflow JSONが見つかりません: {st.session_state.comfy_workflow_path}")
             return
         try:
@@ -1561,6 +1647,9 @@ st.session_state.comfy_url = st.sidebar.text_input("ComfyUI URL", st.session_sta
 st.session_state.comfy_workflow_path = st.sidebar.text_input("workflow_api.jsonパス", st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json"), on_change=update_comfy_settings)
 
 project = st.session_state.project
+if project:
+    process_pending_focus_action()
+    project = st.session_state.project
 
 st.title("PromptGraph Lite")
 st.caption("プロジェクト作成 -> 既存イラスト集の読み込み -> 生成ソース（プロンプト）の編集 -> 差分作成・継続 -> 保存・出力")
@@ -2331,15 +2420,11 @@ with col2:
             branch_col, continue_col = st.columns(2)
             with branch_col:
                 if st.button("差分イラストで新しい話を始める", type="primary"):
-                    new_line_id = duplicate_line(target_line.id, focus_new_branch=True)
-                    if new_line_id:
-                        st.session_state.branch_feedback = "このイラストから差分イラストを作成しました。"
+                    request_focus_action("branch", target_line.id)
                     st.rerun()
             with continue_col:
                 if st.button("差分イラストで続きを作る", type="primary"):
-                    new_line_id = continue_story_from_line(target_line.id)
-                    if new_line_id:
-                        st.session_state.branch_feedback = "次のイラストを作成し、編集画面を移動しました。"
+                    request_focus_action("continue", target_line.id)
                     st.rerun()
 
             st.markdown("#### 生成・比較")
@@ -2400,20 +2485,25 @@ with col2:
 
             if existing_candidates:
                 with st.expander("候補イラスト", expanded=True):
-                    for candidate_index, (candidate, stored_candidate_path, resolved_candidate_path) in enumerate(reversed(existing_candidates)):
-                        st.image(resolved_candidate_path, width="stretch")
-                        st.caption(stored_candidate_path)
-                        ca, cr = st.columns(2)
-                        with ca:
-                            if st.button("出力対象イラストにする", key=f"after_{target_line.id}_{candidate_index}"):
-                                set_candidate_as_after(target_line, stored_candidate_path)
-                                st.success("出力対象イラストに設定しました。")
-                                st.rerun()
-                        with cr:
-                            if st.button("元のイラストにする", key=f"ref_{target_line.id}_{candidate_index}"):
-                                set_candidate_as_reference(target_line, stored_candidate_path)
-                                st.success("元のイラストに設定しました。")
-                                st.rerun()
+                    candidate_items = list(reversed(existing_candidates))
+                    for row_start in range(0, len(candidate_items), 2):
+                        candidate_cols = st.columns(2)
+                        for offset, candidate_col in enumerate(candidate_cols):
+                            candidate_index = row_start + offset
+                            if candidate_index >= len(candidate_items):
+                                continue
+                            _candidate, stored_candidate_path, resolved_candidate_path = candidate_items[candidate_index]
+                            with candidate_col:
+                                st.image(resolved_candidate_path, width="stretch")
+                                st.caption(stored_candidate_path)
+                                if st.button("出力対象イラストにする", key=f"after_{target_line.id}_{candidate_index}"):
+                                    set_candidate_as_after(target_line, stored_candidate_path)
+                                    st.success("出力対象イラストに設定しました。")
+                                    st.rerun()
+                                if st.button("元のイラストにする", key=f"ref_{target_line.id}_{candidate_index}"):
+                                    set_candidate_as_reference(target_line, stored_candidate_path)
+                                    st.success("元のイラストに設定しました。")
+                                    st.rerun()
             else:
                 st.info("候補イラストはまだありません。次のイラスト作成に進む前に候補を生成できます。")
 

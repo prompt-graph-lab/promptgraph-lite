@@ -88,6 +88,10 @@ def create_project_workspace(parent_dir: str, project_name: str) -> tuple[str | 
 
     safe_name = _safe_project_name(project_name)
     project_dir = os.path.join(clean_parent, safe_name)
+    suffix = 1
+    while os.path.exists(project_dir):
+        project_dir = os.path.join(clean_parent, f"{safe_name}_{suffix}")
+        suffix += 1
     project_path = os.path.join(project_dir, "project.json")
 
     if os.path.exists(project_path):
@@ -571,6 +575,33 @@ def add_image_metadata_import(project: Project, source_directory: str) -> dict:
     import_summary = scan_image_directory_metadata(source_directory)
     project.project_metadata.setdefault("image_imports", []).append(import_summary)
     return import_summary
+
+def find_image_metadata_for_line(project: Project, line: PromptLine) -> dict | None:
+    image_path = getattr(line, "image_path", None)
+    if not image_path:
+        return None
+
+    target_path = os.path.normcase(os.path.abspath(os.path.expanduser(image_path)))
+    project.project_metadata = _normalize_project_metadata(getattr(project, "project_metadata", None))
+    for image_import in reversed(project.project_metadata.get("image_imports", [])):
+        if not isinstance(image_import, dict):
+            continue
+        source_directory = str(image_import.get("source_directory") or "").strip()
+        for image_info in reversed(image_import.get("images", [])):
+            if not isinstance(image_info, dict):
+                continue
+            candidate_paths = []
+            filename = str(image_info.get("filename") or "").strip()
+            if source_directory and filename:
+                candidate_paths.append(os.path.join(source_directory, filename))
+            for key in ("current_path", "path"):
+                if image_info.get(key):
+                    candidate_paths.append(str(image_info[key]))
+            for candidate_path in candidate_paths:
+                candidate_abs = os.path.normcase(os.path.abspath(os.path.expanduser(candidate_path)))
+                if candidate_abs == target_path:
+                    return image_info
+    return None
 
 def _latest_image_metadata_import(project: Project) -> dict | None:
     project.project_metadata = _normalize_project_metadata(getattr(project, "project_metadata", None))
