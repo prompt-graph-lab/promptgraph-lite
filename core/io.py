@@ -582,6 +582,15 @@ def _latest_image_metadata_import(project: Project) -> dict | None:
 def _image_import_prompt_text(image_info: dict) -> str:
     return str(image_info.get("prompt_text") or image_info.get("prompt_preview") or "").strip()
 
+def _current_import_image_path(image_info: dict) -> str:
+    return str(image_info.get("current_path") or image_info.get("path") or "").strip()
+
+def _current_import_file_name(image_info: dict) -> str:
+    current_path = _current_import_image_path(image_info)
+    if current_path:
+        return os.path.basename(current_path)
+    return str(image_info.get("filename") or "image").strip() or "image"
+
 def summarize_image_metadata_line_import(project: Project) -> dict:
     latest_import = _latest_image_metadata_import(project)
     images = latest_import.get("images", []) if latest_import else []
@@ -631,15 +640,16 @@ def create_prompt_lines_from_latest_image_import(project: Project) -> tuple[Proj
 
         line_index = start_index + created_count
         line_id, sequence = _next_image_metadata_line_id(existing_ids, sequence)
+        current_image_path = _current_import_image_path(image_info)
         prompt_line = PromptLine(
             id=line_id,
-            original_file_name=str(image_info.get("filename") or os.path.basename(image_info.get("path", "")) or "image"),
+            original_file_name=_current_import_file_name(image_info),
             original_index=line_index,
             current_index=line_index,
             original_text=prompt_text,
             current_text=prompt_text,
             tokens=parse_prompt(prompt_text),
-            image_path=image_info.get("current_path") or image_info.get("path"),
+            image_path=current_image_path,
         )
         prompt_line.negative_prompt = str(image_info.get("negative_prompt") or "").strip()
         project.prompt_lines.append(prompt_line)
