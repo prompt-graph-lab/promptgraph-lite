@@ -790,13 +790,28 @@ def get_line_candidate_items(line, project=None) -> list[tuple[str, str]]:
     seen = set()
     for candidate in reversed(list(_get_line_generated_candidates(line))):
         candidate_path = _candidate_path(candidate)
-        if not candidate_path or candidate_path in seen:
+        identity = _candidate_identity_path(candidate_path)
+        if not candidate_path or identity in seen:
             continue
         resolved_path = _existing_project_image_path(candidate_path, project)
         if resolved_path:
             items.append((candidate_path, resolved_path))
-            seen.add(candidate_path)
+            seen.add(identity)
     return items
+
+SUPPORTED_MANUAL_CANDIDATE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+
+def validate_manual_candidate_path(image_path: str, project=None) -> tuple[str, str]:
+    clean_path = (image_path or "").strip().strip('"')
+    if not clean_path:
+        return "", "画像ファイルパスを入力してください。"
+    extension = os.path.splitext(clean_path)[1].lower()
+    if extension not in SUPPORTED_MANUAL_CANDIDATE_EXTENSIONS:
+        return "", "対応形式は png / jpg / jpeg / webp です。"
+    resolved_path = _existing_project_image_path(clean_path, project)
+    if not resolved_path:
+        return "", "画像ファイルが見つかりません。パスを確認してください。"
+    return clean_path, ""
 
 def render_gallery_line_editor(line, project) -> None:
     st.markdown(f"#### 編集: `{line.original_file_name}`")
@@ -832,6 +847,43 @@ def render_gallery_line_editor(line, project) -> None:
                     st.rerun()
     else:
         st.caption("候補イラストはまだありません。")
+
+    st.markdown("##### 候補イラストを追加")
+    manual_candidate_path = st.text_input(
+        "画像ファイルパス",
+        key=f"gallery_manual_candidate_path_{line.id}",
+        placeholder="D:\\path\\to\\generated.png",
+    )
+    add_col, add_output_col = st.columns(2)
+    with add_col:
+        if st.button("候補として追加", key=f"gallery_add_candidate_{line.id}"):
+            candidate_path, error = validate_manual_candidate_path(manual_candidate_path, project)
+            if error:
+                st.warning(error)
+            else:
+                existing_candidates = _get_line_generated_candidates(line)
+                candidate_identity = _candidate_identity_path(candidate_path)
+                already_exists = any(
+                    _candidate_identity_path(_candidate_path(candidate)) == candidate_identity
+                    for candidate in existing_candidates
+                )
+                if already_exists:
+                    st.info("この候補イラストはすでに追加済みです。")
+                else:
+                    push_history()
+                    add_candidate_image(line, candidate_path)
+                    autosave_current_project("候補イラストを手動追加")
+                    st.success("候補イラストを追加しました。")
+                st.rerun()
+    with add_output_col:
+        if st.button("追加して出力対象にする", key=f"gallery_add_candidate_output_{line.id}"):
+            candidate_path, error = validate_manual_candidate_path(manual_candidate_path, project)
+            if error:
+                st.warning(error)
+            else:
+                set_candidate_as_after(line, candidate_path)
+                st.success("候補イラストを追加し、出力対象に設定しました。")
+                st.rerun()
 
 def render_illustration_selection_mode(project) -> None:
     active_lines = [line for line in project.prompt_lines if not getattr(line, "deleted", False)]
@@ -1145,6 +1197,11 @@ def _candidate_path(candidate):
         return str(candidate.get("path") or "")
     return str(candidate) if candidate else ""
 
+def _candidate_identity_path(path: str) -> str:
+    if not path:
+        return ""
+    return os.path.normcase(os.path.abspath(os.path.expanduser(str(path))))
+
 def _normalize_candidate_record(candidate):
     if isinstance(candidate, dict):
         path = _candidate_path(candidate)
@@ -1167,9 +1224,10 @@ def _normalize_candidate_records(candidates):
         if not record:
             continue
         path = record["path"]
-        if path not in seen:
+        identity = _candidate_identity_path(path)
+        if identity not in seen:
             normalized.append(record)
-            seen.add(path)
+            seen.add(identity)
     return normalized
 
 def _make_generated_candidate_record(path, line, source):
@@ -1198,15 +1256,16 @@ def _append_line_generated_candidates(line, candidates_to_add):
     if isinstance(candidates_to_add, (str, dict)):
         candidates_to_add = [candidates_to_add]
     candidates = _get_line_generated_candidates(line)
-    seen = {_candidate_path(candidate) for candidate in candidates}
+    seen = {_candidate_identity_path(_candidate_path(candidate)) for candidate in candidates}
     for candidate in candidates_to_add or []:
         record = _normalize_candidate_record(candidate)
         if not record:
             continue
         path = record["path"]
-        if path not in seen:
+        identity = _candidate_identity_path(path)
+        if identity not in seen:
             candidates.append(record)
-            seen.add(path)
+            seen.add(identity)
     line.generated_candidates = candidates
     line.candidate_image_paths = [_candidate_path(candidate) for candidate in candidates]
 
