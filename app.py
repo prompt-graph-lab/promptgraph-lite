@@ -78,6 +78,8 @@ if "selection_mode_enabled" not in st.session_state:
     st.session_state.selection_mode_enabled = False
 if "selection_mode_delete_candidates" not in st.session_state:
     st.session_state.selection_mode_delete_candidates = {}
+if "gallery_expanded_line_id" not in st.session_state:
+    st.session_state.gallery_expanded_line_id = None
 
 def _saved_time_label() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -573,6 +575,8 @@ def delete_lines(line_ids) -> int:
     st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
     st.session_state.selected_lines = {}
     st.session_state.selection_mode_delete_candidates = {}
+    if st.session_state.get("gallery_expanded_line_id") in existing_target_ids:
+        st.session_state.gallery_expanded_line_id = None
     autosave_current_project("イラストを削除")
     return deleted_count
 
@@ -698,9 +702,88 @@ def get_line_thumbnail_path(line, project=None) -> str:
             return existing_path
     return ""
 
+def get_line_candidate_items(line, project=None) -> list[tuple[str, str]]:
+    items = []
+    seen = set()
+    for candidate in reversed(list(_get_line_generated_candidates(line))):
+        candidate_path = _candidate_path(candidate)
+        if not candidate_path or candidate_path in seen:
+            continue
+        resolved_path = _existing_project_image_path(candidate_path, project)
+        if resolved_path:
+            items.append((candidate_path, resolved_path))
+            seen.add(candidate_path)
+    return items
+
+def render_gallery_line_editor(line, project) -> None:
+    st.markdown(f"#### 編集: `{line.original_file_name}`")
+    edit_text = st.text_area(
+        "生成ソース（プロンプト）を直接編集",
+        value=getattr(line, "current_text", "") or "",
+        key=f"gallery_text_{line.id}",
+        height=120,
+    )
+    action_cols = st.columns([1, 1, 2])
+    with action_cols[0]:
+        if st.button("保存", key=f"gallery_save_{line.id}", type="primary"):
+            update_line_text(line.id, edit_text)
+            st.success("生成ソースを保存しました。")
+            st.rerun()
+    with action_cols[1]:
+        if st.button("ComfyUIで単発生成", key=f"gallery_generate_{line.id}", type="primary"):
+            try:
+                if edit_text != getattr(line, "current_text", ""):
+                    update_line_text(line.id, edit_text)
+                    line = next(
+                        candidate for candidate in st.session_state.project.prompt_lines
+                        if candidate.id == line.id
+                    )
+                workflow_json = build_lite_generation_workflow(line)
+                output_dir = get_generated_output_dir(st.session_state.project)
+                os.makedirs(output_dir, exist_ok=True)
+                progress_bar = st.progress(0.0)
+                status_text = st.empty()
+                gen_path = None
+                for status in generate_image_with_progress(
+                    workflow_json,
+                    st.session_state.comfy_url,
+                    output_dir,
+                    f"gen_{line.id}",
+                ):
+                    if "value" in status:
+                        progress_bar.progress(status["value"])
+                    if "text" in status:
+                        status_text.markdown(f"**状態:** {status['text']}")
+                    if status.get("type") == "done":
+                        gen_path = status.get("path")
+                if gen_path:
+                    set_candidate_as_after(line, gen_path)
+                    st.success("候補イラストを生成し、出力対象に設定しました。")
+                    st.rerun()
+            except Exception as exc:
+                st.error(f"単発生成に失敗しました: {exc}")
+    with action_cols[2]:
+        st.caption("生成結果は候補イラストとして保存し、このイラストの出力対象にも設定します。")
+
+    candidate_items = get_line_candidate_items(line, project)
+    if candidate_items:
+        st.caption("候補イラスト")
+        candidate_cols = st.columns(2)
+        for index, (stored_path, resolved_path) in enumerate(candidate_items[:4]):
+            with candidate_cols[index % 2]:
+                st.image(resolved_path, width="stretch")
+                is_output = stored_path == getattr(line, "selected_candidate_path", None) or stored_path == getattr(line, "generated_image_path", None)
+                st.caption("出力対象" if is_output else "候補")
+                if st.button("出力対象にする", key=f"gallery_output_{line.id}_{index}"):
+                    set_candidate_as_after(line, stored_path)
+                    st.rerun()
+    else:
+        st.caption("候補イラストはまだありません。")
+
 def render_illustration_selection_mode(project) -> None:
     active_lines = [line for line in project.prompt_lines if not getattr(line, "deleted", False)]
     active_ids = {line.id for line in active_lines}
+    visible_line_ids = [line.id for line in active_lines]
     candidates = st.session_state.get("selection_mode_delete_candidates", {})
     if not isinstance(candidates, dict):
         candidates = {}
@@ -712,18 +795,18 @@ def render_illustration_selection_mode(project) -> None:
     st.session_state.selection_mode_delete_candidates = candidates
 
     delete_candidate_ids = [line_id for line_id, selected in candidates.items() if selected]
-    st.subheader("画像選別モード")
-    st.caption("大量のイラストを軽く確認し、不要なものを削除候補としてまとめて除外できます。")
+    st.subheader("ギャラリー編集モード")
+    st.caption("画像を見ながら順番調整、削除候補の選別、生成ソース編集、単発生成を行います。")
     top_left, top_right = st.columns([1, 1])
     with top_left:
         st.write(f"削除候補: {len(delete_candidate_ids)}件")
         st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
     with top_right:
-        if st.button("通常表示に戻る", type="secondary"):
+        if st.button("通常表示に戻る", type="secondary", key="gallery_exit_inside_top"):
             st.session_state.selection_mode_enabled = False
             st.rerun()
 
-    if st.button("削除候補をまとめて削除", type="primary", disabled=not delete_candidate_ids):
+    if st.button("削除候補をまとめて削除", type="primary", disabled=not delete_candidate_ids, key="gallery_delete_top"):
         deleted_count = delete_lines(delete_candidate_ids)
         st.session_state.selection_mode_delete_candidates = {}
         if deleted_count:
@@ -735,14 +818,13 @@ def render_illustration_selection_mode(project) -> None:
         st.info("表示できるイラストがありません。")
         return
 
+    expanded_line_id = st.session_state.get("gallery_expanded_line_id")
     for row_start in range(0, len(active_lines), 4):
+        row_lines = active_lines[row_start: row_start + 4]
         cols = st.columns(4)
-        for offset, col in enumerate(cols):
+        for offset, line in enumerate(row_lines):
             line_index = row_start + offset
-            if line_index >= len(active_lines):
-                continue
-            line = active_lines[line_index]
-            with col:
+            with cols[offset]:
                 thumbnail_path = get_line_thumbnail_path(line, project)
                 if thumbnail_path:
                     st.image(thumbnail_path, width="stretch")
@@ -751,13 +833,45 @@ def render_illustration_selection_mode(project) -> None:
                 st.caption(f"{line.current_index + 1:04d} / {line.original_file_name}")
                 prompt_preview = " ".join((getattr(line, "current_text", "") or "").split())
                 if prompt_preview:
-                    st.caption(prompt_preview[:80] + ("..." if len(prompt_preview) > 80 else ""))
+                    st.caption(prompt_preview[:70] + ("..." if len(prompt_preview) > 70 else ""))
                 checked = st.checkbox(
                     "削除候補",
                     value=bool(candidates.get(line.id, False)),
                     key=f"selection_mode_delete_{line.id}",
                 )
                 st.session_state.selection_mode_delete_candidates[line.id] = checked
+                move_cols = st.columns(2)
+                with move_cols[0]:
+                    if st.button("↑", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
+                        if move_line(line.id, visible_line_ids, "up"):
+                            st.rerun()
+                with move_cols[1]:
+                    if st.button("↓", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
+                        if move_line(line.id, visible_line_ids, "down"):
+                            st.rerun()
+                if st.button("編集", key=f"gallery_edit_{line.id}"):
+                    st.session_state.gallery_expanded_line_id = None if expanded_line_id == line.id else line.id
+                    st.rerun()
+
+        row_expanded = next((line for line in row_lines if line.id == st.session_state.get("gallery_expanded_line_id")), None)
+        if row_expanded:
+            with st.container(border=True):
+                render_gallery_line_editor(row_expanded, project)
+                st.caption("将来のルート分岐UIでは、分岐イラストの直前にAルート / Bルートの選択ブロックを置ける構造にします。")
+
+    st.write("---")
+    bottom_cols = st.columns([1, 1])
+    with bottom_cols[0]:
+        if st.button("削除候補をまとめて削除", type="primary", disabled=not delete_candidate_ids, key="gallery_delete_bottom"):
+            deleted_count = delete_lines(delete_candidate_ids)
+            st.session_state.selection_mode_delete_candidates = {}
+            if deleted_count:
+                st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
+            st.rerun()
+    with bottom_cols[1]:
+        if st.button("通常表示に戻る", key="gallery_exit_bottom"):
+            st.session_state.selection_mode_enabled = False
+            st.rerun()
 
 def count_line_candidates(line) -> int:
     candidate_paths = []
@@ -1799,13 +1913,13 @@ with mode_cols[0]:
             st.session_state.selection_mode_enabled = False
             st.rerun()
     else:
-        if st.button("画像選別モード", type="primary", key="selection_mode_enter"):
+        if st.button("ギャラリー編集モード", type="primary", key="selection_mode_enter"):
             st.session_state.selection_mode_enabled = True
             st.session_state.focused_line_id = None
             st.session_state.selected_node_ids = []
             st.rerun()
 with mode_cols[1]:
-    st.caption("画像選別モードでは、サムネイルを見ながら削除候補だけをまとめて選べます。")
+    st.caption("ギャラリー編集モードでは、画像を見ながら並び替え・削除候補選別・生成ソース編集・単発生成ができます。")
 
 if st.session_state.selection_mode_enabled:
     render_illustration_selection_mode(project)
