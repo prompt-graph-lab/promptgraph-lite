@@ -587,20 +587,24 @@ def find_image_metadata_for_line(project: Project, line: PromptLine) -> dict | N
         if not isinstance(image_import, dict):
             continue
         source_directory = str(image_import.get("source_directory") or "").strip()
-        for image_info in reversed(image_import.get("images", [])):
-            if not isinstance(image_info, dict):
-                continue
-            candidate_paths = []
-            filename = str(image_info.get("filename") or "").strip()
-            if source_directory and filename:
-                candidate_paths.append(os.path.join(source_directory, filename))
+        image_infos = [image_info for image_info in reversed(image_import.get("images", [])) if isinstance(image_info, dict)]
+        for image_info in image_infos:
             for key in ("current_path", "path"):
-                if image_info.get(key):
-                    candidate_paths.append(str(image_info[key]))
-            for candidate_path in candidate_paths:
-                candidate_abs = os.path.normcase(os.path.abspath(os.path.expanduser(candidate_path)))
+                if not image_info.get(key):
+                    continue
+                candidate_abs = os.path.normcase(os.path.abspath(os.path.expanduser(str(image_info[key]))))
                 if candidate_abs == target_path:
                     return image_info
+        for image_info in image_infos:
+            if not isinstance(image_info, dict):
+                continue
+            filename = str(image_info.get("filename") or "").strip()
+            if not source_directory or not filename:
+                continue
+            candidate_path = os.path.join(source_directory, filename)
+            candidate_abs = os.path.normcase(os.path.abspath(os.path.expanduser(candidate_path)))
+            if candidate_abs == target_path:
+                return image_info
     return None
 
 def _latest_image_metadata_import(project: Project) -> dict | None:

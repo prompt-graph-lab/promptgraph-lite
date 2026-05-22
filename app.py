@@ -805,33 +805,87 @@ def _replace_clip_text_prompts(workflow_json, line, image_metadata=None):
     imported_negative = (image_metadata or {}).get("negative_prompt") or ""
     replacements = 0
     clip_inputs = []
-    for node in nodes.values():
+    for node_id, node in nodes.items():
         if not isinstance(node, dict):
             continue
         if "CLIPTextEncode" not in str(node.get("class_type", "")):
             continue
         inputs = node.get("inputs", {})
         if isinstance(inputs, dict) and isinstance(inputs.get("text"), str):
-            clip_inputs.append(inputs)
+            clip_inputs.append({"node_id": str(node_id), "inputs": inputs})
 
-    for inputs in clip_inputs:
-        text = inputs.get("text", "")
-        if imported_positive and text == imported_positive:
-            inputs["text"] = current_positive
-            replacements += 1
-        elif imported_negative and text == imported_negative:
-            inputs["text"] = current_negative
-            replacements += 1
+    replaced_indexes = set()
 
-    if replacements == 0 and not image_metadata:
-        for inputs in clip_inputs:
-            if inputs.get("text"):
-                inputs["text"] = current_positive
-                replacements += 1
+    def normalize_prompt_text(value: str) -> str:
+        return " ".join(str(value or "").split())
 
-    if replacements == 0 and len(clip_inputs) == 1:
-        clip_inputs[0]["text"] = current_positive
+    def replace_clip(index: int, text: str) -> None:
+        nonlocal replacements
+        if index in replaced_indexes:
+            return
+        clip_inputs[index]["inputs"]["text"] = text
+        replaced_indexes.add(index)
         replacements += 1
+
+    def clip_index_by_node_id(node_id: str | None) -> int | None:
+        if not node_id:
+            return None
+        for index, entry in enumerate(clip_inputs):
+            if entry["node_id"] == str(node_id):
+                return index
+        return None
+
+    def node_link_id(value) -> str | None:
+        if isinstance(value, list) and value:
+            return str(value[0])
+        return None
+
+    def ksampler_clip_roles() -> tuple[int | None, int | None]:
+        for node in nodes.values():
+            if not isinstance(node, dict):
+                continue
+            if "KSampler" not in str(node.get("class_type", "")):
+                continue
+            inputs = node.get("inputs", {})
+            if not isinstance(inputs, dict):
+                continue
+            positive_index = clip_index_by_node_id(node_link_id(inputs.get("positive")))
+            negative_index = clip_index_by_node_id(node_link_id(inputs.get("negative")))
+            if positive_index is not None or negative_index is not None:
+                return positive_index, negative_index
+        return None, None
+
+    for index, entry in enumerate(clip_inputs):
+        text = entry["inputs"].get("text", "")
+        if imported_positive and text == imported_positive:
+            replace_clip(index, current_positive)
+        elif imported_negative and text == imported_negative:
+            replace_clip(index, current_negative)
+
+    for index, entry in enumerate(clip_inputs):
+        if index in replaced_indexes:
+            continue
+        text = entry["inputs"].get("text", "")
+        normalized_text = normalize_prompt_text(text)
+        if imported_positive and normalized_text == normalize_prompt_text(imported_positive):
+            replace_clip(index, current_positive)
+        elif imported_negative and normalized_text == normalize_prompt_text(imported_negative):
+            replace_clip(index, current_negative)
+
+    positive_index, negative_index = ksampler_clip_roles()
+    if positive_index is not None:
+        replace_clip(positive_index, current_positive)
+    if negative_index is not None:
+        replace_clip(negative_index, current_negative)
+
+    if len(clip_inputs) == 2:
+        replace_clip(0, current_positive)
+        replace_clip(1, current_negative)
+    elif len(clip_inputs) > 2 and not replaced_indexes:
+        replace_clip(0, current_positive)
+        replace_clip(1, current_negative)
+    elif len(clip_inputs) == 1 and not replaced_indexes:
+        replace_clip(0, current_positive)
 
     return replacements
 
