@@ -1,6 +1,6 @@
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
-from core.io import load_directory, export_to_txt, export_prompt_image_set, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import, create_project_workspace, ensure_project_folder_layout, project_dir_from_path
+from core.io import load_directory, export_to_txt, export_prompt_image_set, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import, create_project_workspace, ensure_project_folder_layout, project_dir_from_path, resolve_project_image_path, image_path_resolution_attempts
 from core.graph_builder import build_graph
 from core.operations import rename_node, delete_nodes, insert_node, duplicate_nodes, move_nodes, merge_duplicates_in_line, merge_duplicates_all_lines, apply_node_weight, insert_subgraph, replace_with_subgraph, rename_word_global, delete_word_global, insert_word_global, count_matches, get_available_modules, get_active_tokens, get_display_tokens, get_display_tokens_from_text, extract_module_structure_from_text
 from core.parser import parse_prompt
@@ -525,16 +525,19 @@ def get_candidate_image_paths(line) -> list[str]:
     return [_candidate_path(candidate) for candidate in _get_line_generated_candidates(line)]
 
 def _existing_project_image_path(path: str, project=None) -> str:
+    return resolve_project_image_path(project, path, recursive_basename_search=True)
+
+def _last_image_path_attempt(path: str, project=None) -> str:
+    attempts = image_path_resolution_attempts(project, path, recursive_basename_search=True)
+    return attempts[-1] if attempts else ""
+
+def show_missing_image_debug(path: str, project=None) -> None:
     if not path:
-        return ""
-    if os.path.exists(path):
-        return path
-    source_directory = getattr(project, "source_directory", "") if project else ""
-    if source_directory:
-        candidate_path = os.path.join(source_directory, path)
-        if os.path.exists(candidate_path):
-            return os.path.abspath(candidate_path)
-    return ""
+        return
+    st.caption(f"保存パス: {path}")
+    attempted_path = _last_image_path_attempt(path, project)
+    if attempted_path:
+        st.caption(f"確認パス: {attempted_path}")
 
 def get_line_thumbnail_path(line, project=None) -> str:
     for path in (
@@ -2138,16 +2141,20 @@ with col2:
             img_c1, img_c2 = st.columns(2)
             with img_c1:
                 st.caption("元のイラスト")
-                if target_line.image_path and os.path.exists(target_line.image_path):
-                    st.image(target_line.image_path, width="stretch")
+                reference_image_path = _existing_project_image_path(getattr(target_line, "image_path", None), project)
+                if reference_image_path:
+                    st.image(reference_image_path, width="stretch")
                 else:
                     st.info("元のイラストはありません。")
+                    show_missing_image_debug(getattr(target_line, "image_path", None), project)
             with img_c2:
                 st.caption("出力対象イラスト")
-                if getattr(target_line, "generated_image_path", None) and os.path.exists(target_line.generated_image_path):
-                    st.image(target_line.generated_image_path, width="stretch")
+                output_image_path = _existing_project_image_path(getattr(target_line, "generated_image_path", None), project)
+                if output_image_path:
+                    st.image(output_image_path, width="stretch")
                 else:
                     st.info("出力対象イラストはまだ選択されていません。")
+                    show_missing_image_debug(getattr(target_line, "generated_image_path", None), project)
 
             st.markdown("#### 生成ソース（プロンプト）")
             st.caption("中央のグラフやPromptCloudからワードを選択すると、このイラストの生成ソース内で該当語が強調表示されます。")
@@ -2247,23 +2254,23 @@ with col2:
             st.markdown("#### 候補イラスト管理")
             st.caption("候補を比較し、出力対象イラストまたは次の生成に使う元のイラストとして設定できます。")
             candidates = list(_get_line_generated_candidates(target_line))
-            existing_candidates = [
-                candidate
-                for candidate in candidates
-                if _candidate_path(candidate) and os.path.exists(_candidate_path(candidate))
-            ]
-            missing_candidates = [
-                candidate
-                for candidate in candidates
-                if _candidate_path(candidate) and not os.path.exists(_candidate_path(candidate))
-            ]
+            existing_candidates = []
+            missing_candidates = []
+            for candidate in candidates:
+                candidate_path = _candidate_path(candidate)
+                if not candidate_path:
+                    continue
+                resolved_candidate_path = _existing_project_image_path(candidate_path, project)
+                if resolved_candidate_path:
+                    existing_candidates.append((candidate, resolved_candidate_path))
+                else:
+                    missing_candidates.append(candidate)
             if missing_candidates:
                 st.caption(f"保存済み候補パスのうち {len(missing_candidates)} 件が見つかりません。")
 
             if existing_candidates:
                 with st.expander("候補イラスト", expanded=True):
-                    for candidate_index, candidate in enumerate(reversed(existing_candidates)):
-                        candidate_path = _candidate_path(candidate)
+                    for candidate_index, (candidate, candidate_path) in enumerate(reversed(existing_candidates)):
                         st.image(candidate_path, width="stretch")
                         st.caption(candidate_path)
                         ca, cr = st.columns(2)
@@ -2305,6 +2312,7 @@ with col2:
                         st.image(thumbnail_path, width=72)
                     else:
                         st.caption("画像なし")
+                        show_missing_image_debug(getattr(l, "image_path", None), project)
 
                 with col_exp:
                     with st.expander(title):
@@ -2312,13 +2320,15 @@ with col2:
                             st.session_state.focused_line_id = l.id
                             st.rerun()
                             
-                        if l.image_path and os.path.exists(l.image_path):
+                        line_image_path = _existing_project_image_path(getattr(l, "image_path", None), project)
+                        if line_image_path:
                             c_img, c_txt = st.columns([1, 2])
                             with c_img:
-                                st.image(l.image_path, width="stretch")
+                                st.image(line_image_path, width="stretch")
                             with c_txt:
                                 new_text = st.text_area("生成ソース", l.current_text, key=f"text_{l.id}", label_visibility="collapsed")
                         else:
+                            show_missing_image_debug(getattr(l, "image_path", None), project)
                             new_text = st.text_area("生成ソース", l.current_text, key=f"text_{l.id}")
                             
                         if new_text != l.current_text:

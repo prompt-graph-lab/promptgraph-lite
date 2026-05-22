@@ -750,17 +750,59 @@ def _unique_export_dir(output_dir: str) -> str:
             return candidate
         suffix += 1
 
-def _resolve_export_image_path(project: Project, image_path: str) -> str:
+def _append_unique_path(paths: list[str], path: str) -> None:
+    if path and path not in paths:
+        paths.append(path)
+
+def image_path_resolution_attempts(
+    project: Project,
+    image_path: str,
+    recursive_basename_search: bool = False,
+    max_recursive_files: int = 2000,
+) -> list[str]:
     if not image_path:
-        return ""
-    if os.path.exists(image_path):
-        return os.path.abspath(image_path)
-    if os.path.isabs(image_path):
-        return image_path
-    source_directory = getattr(project, "source_directory", "") or ""
-    if source_directory:
-        return os.path.abspath(os.path.join(source_directory, image_path))
-    return image_path
+        return []
+
+    raw_path = str(image_path)
+    normalized_path = os.path.normpath(os.path.expanduser(raw_path))
+    source_directory = getattr(project, "source_directory", "") if project else ""
+    source_directory = os.path.normpath(os.path.expanduser(source_directory)) if source_directory else ""
+    attempts = []
+
+    _append_unique_path(attempts, raw_path)
+    _append_unique_path(attempts, os.path.abspath(normalized_path))
+
+    if source_directory and not os.path.isabs(normalized_path):
+        _append_unique_path(attempts, os.path.abspath(os.path.join(source_directory, normalized_path)))
+
+    basename = os.path.basename(normalized_path)
+    if source_directory and basename:
+        _append_unique_path(attempts, os.path.abspath(os.path.join(source_directory, basename)))
+
+    if recursive_basename_search and source_directory and basename and os.path.isdir(source_directory):
+        scanned_files = 0
+        for root, _, files in os.walk(source_directory):
+            scanned_files += len(files)
+            if scanned_files > max_recursive_files:
+                break
+            if basename in files:
+                _append_unique_path(attempts, os.path.abspath(os.path.join(root, basename)))
+                break
+
+    return attempts
+
+def resolve_project_image_path(
+    project: Project,
+    image_path: str,
+    recursive_basename_search: bool = False,
+) -> str:
+    for path in image_path_resolution_attempts(project, image_path, recursive_basename_search):
+        if os.path.exists(path):
+            return os.path.abspath(path)
+    return ""
+
+def _resolve_export_image_path(project: Project, image_path: str) -> str:
+    return resolve_project_image_path(project, image_path, recursive_basename_search=True)
 
 def _selected_export_image(project: Project, line: PromptLine) -> tuple[str, str]:
     choices = (
