@@ -1,6 +1,6 @@
 import streamlit as st
 from streamlit_agraph import agraph, Node, Edge, Config
-from core.io import load_directory, export_to_txt, export_prompt_image_set, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import, create_project_workspace, ensure_project_folder_layout, project_dir_from_path
+from core.io import load_directory, export_to_txt, export_prompt_image_set, save_project_to_json, load_project_from_json, add_image_metadata_import, create_prompt_lines_from_latest_image_import, create_project_workspace, ensure_project_folder_layout, project_dir_from_path, resolve_project_image_path, image_path_resolution_attempts
 from core.graph_builder import build_graph
 from core.operations import rename_node, delete_nodes, insert_node, duplicate_nodes, move_nodes, merge_duplicates_in_line, merge_duplicates_all_lines, apply_node_weight, insert_subgraph, replace_with_subgraph, rename_word_global, delete_word_global, insert_word_global, count_matches, get_available_modules, get_active_tokens, get_display_tokens, get_display_tokens_from_text, extract_module_structure_from_text
 from core.parser import parse_prompt
@@ -225,6 +225,78 @@ def get_line_by_id(project, line_id):
         (line for line in project.prompt_lines if line.id == line_id and not getattr(line, "deleted", False)),
         None,
     )
+
+IMPORT_MODE_REPLACE = "上書き読み込み"
+IMPORT_MODE_APPEND = "追加読み込み"
+
+def _clear_import_selection_state() -> None:
+    st.session_state.focused_line_id = None
+    st.session_state.selected_node_ids = []
+    st.session_state.connect_mode = False
+    st.session_state.connect_nodes = []
+    st.session_state.selected_lines = {}
+
+def _imported_lines_for_merge(imported_lines, existing_ids: set[str], start_index: int) -> list:
+    merged_lines = []
+    next_index = start_index
+    for line in imported_lines:
+        if getattr(line, "deleted", False):
+            continue
+        new_line = copy.deepcopy(line)
+        base_id = new_line.id or f"imported_line_{next_index}"
+        candidate_id = base_id
+        suffix = 1
+        while candidate_id in existing_ids:
+            candidate_id = f"{base_id}_{suffix}"
+            suffix += 1
+        existing_ids.add(candidate_id)
+        new_line.id = candidate_id
+        new_line.original_index = next_index
+        new_line.current_index = next_index
+        merged_lines.append(new_line)
+        next_index += 1
+    return merged_lines
+
+def _merge_image_import_metadata(target_project, imported_project) -> None:
+    imported_metadata = getattr(imported_project, "project_metadata", None)
+    imported_image_imports = imported_metadata.get("image_imports", []) if isinstance(imported_metadata, dict) else []
+    if not imported_image_imports:
+        return
+    target_metadata = getattr(target_project, "project_metadata", None)
+    if not isinstance(target_metadata, dict):
+        target_metadata = {"image_imports": []}
+    target_metadata.setdefault("image_imports", []).extend(copy.deepcopy(imported_image_imports))
+    target_project.project_metadata = target_metadata
+
+def apply_imported_project(imported_project, import_mode: str, autosave_reason: str) -> None:
+    previous_project = st.session_state.get("project")
+    previous_project_path = st.session_state.get("current_project_path") or ""
+    if previous_project:
+        push_history()
+
+    if previous_project:
+        project = previous_project
+        if not previous_project_path and import_mode == IMPORT_MODE_REPLACE:
+            project.source_directory = imported_project.source_directory
+    else:
+        st.session_state.history = []
+        project = Project(source_directory=imported_project.source_directory)
+
+    if import_mode == IMPORT_MODE_APPEND:
+        start_index = max((line.current_index for line in project.prompt_lines), default=-1) + 1
+        existing_ids = {line.id for line in project.prompt_lines}
+        project.prompt_lines.extend(_imported_lines_for_merge(imported_project.prompt_lines, existing_ids, start_index))
+    else:
+        project.prompt_lines = _imported_lines_for_merge(imported_project.prompt_lines, set(), 0)
+
+    _merge_image_import_metadata(project, imported_project)
+    st.session_state.project = build_graph(project)
+    st.session_state.current_project_path = previous_project_path
+    if not previous_project_path:
+        st.session_state.last_saved_at = ""
+    _clear_import_selection_state()
+    sync_text_areas()
+    autosave_current_project(autosave_reason)
 
 def _shortcut_context():
     line = get_line_by_id(st.session_state.get("project"), st.session_state.get("focused_line_id"))
@@ -525,16 +597,19 @@ def get_candidate_image_paths(line) -> list[str]:
     return [_candidate_path(candidate) for candidate in _get_line_generated_candidates(line)]
 
 def _existing_project_image_path(path: str, project=None) -> str:
+    return resolve_project_image_path(project, path, recursive_basename_search=True)
+
+def _last_image_path_attempt(path: str, project=None) -> str:
+    attempts = image_path_resolution_attempts(project, path)
+    return attempts[-1] if attempts else ""
+
+def show_missing_image_debug(path: str, project=None) -> None:
     if not path:
-        return ""
-    if os.path.exists(path):
-        return path
-    source_directory = getattr(project, "source_directory", "") if project else ""
-    if source_directory:
-        candidate_path = os.path.join(source_directory, path)
-        if os.path.exists(candidate_path):
-            return os.path.abspath(candidate_path)
-    return ""
+        return
+    st.caption(f"保存パス: {path}")
+    attempted_path = _last_image_path_attempt(path, project)
+    if attempted_path:
+        st.caption(f"確認パス: {attempted_path}")
 
 def get_line_thumbnail_path(line, project=None) -> str:
     for path in (
@@ -1127,24 +1202,24 @@ st.sidebar.markdown("---")
 st.sidebar.subheader("プロジェクトにイラスト集を追加")
 st.sidebar.info("手元のイラスト集がある場合は、生成ソース（プロンプト）と画像をフォルダから読み込めます。")
 target_dir = st.sidebar.text_input("読み込みフォルダ", st.session_state.settings.get("last_source_directory", "./dummy_data"))
+import_mode = st.sidebar.radio(
+    "読み込み方法",
+    [IMPORT_MODE_REPLACE, IMPORT_MODE_APPEND],
+    index=0,
+    key="lite_import_mode",
+)
+st.sidebar.caption("上書き読み込み：現在のイラスト一覧を置き換えます")
+st.sidebar.caption("追加読み込み：現在のイラスト一覧の末尾に追加します")
 
 if st.sidebar.button("フォルダから読み込む", key="import_directory"):
     if os.path.isdir(target_dir):
-        st.session_state.history = []
         with st.spinner("イラスト一覧を構築しています..."):
-            project = load_directory(target_dir, max_depth=None)
-            project = build_graph(project)
-        st.session_state.project = project
-        st.session_state.current_project_path = ""
-        st.session_state.last_saved_at = ""
-        st.session_state.autosave_feedback = "自動保存: 待機中（保存先なし）"
-        st.session_state.focused_line_id = None
-        st.session_state.selected_node_ids = []
-        st.session_state.connect_mode = False
-        
+            imported_project = load_directory(target_dir, max_depth=None)
+        apply_imported_project(imported_project, import_mode, "フォルダから読み込み")
+
         st.session_state.settings["last_source_directory"] = target_dir
         save_settings(st.session_state.settings)
-        st.sidebar.success(f"読み込みました: {target_dir}")
+        st.sidebar.success(f"{import_mode}しました: {target_dir}")
         st.rerun()
     else:
         st.sidebar.error("フォルダパスが正しくありません。")
@@ -1155,40 +1230,26 @@ if st.sidebar.button(
     key="png_metadata_import",
 ):
     if os.path.isdir(target_dir):
-        previous_project_path = st.session_state.get("current_project_path") or ""
-        if st.session_state.project:
-            push_history()
-            project = st.session_state.project
-        else:
-            st.session_state.history = []
-            project = Project(source_directory=target_dir)
+        imported_project = Project(source_directory=target_dir)
 
         with st.spinner("PNGメタデータから生成ソース（プロンプト）を復元しています..."):
-            import_summary = add_image_metadata_import(project, target_dir)
-            project, line_summary = create_prompt_lines_from_latest_image_import(project)
-            project = build_graph(project)
+            import_summary = add_image_metadata_import(imported_project, target_dir)
+            imported_project, line_summary = create_prompt_lines_from_latest_image_import(imported_project)
+        apply_imported_project(imported_project, import_mode, "PNGメタデータを読み込み")
 
-        st.session_state.project = project
-        st.session_state.current_project_path = previous_project_path
-        if not previous_project_path:
-            st.session_state.last_saved_at = ""
-        st.session_state.focused_line_id = None
-        st.session_state.selected_node_ids = []
-        st.session_state.connect_mode = False
-        st.session_state.connect_nodes = []
         st.session_state.settings["last_source_directory"] = target_dir
         save_settings(st.session_state.settings)
-        sync_text_areas()
-        autosave_current_project("PNGメタデータを読み込み")
 
         no_metadata_count = max(import_summary.get("image_count", 0) - import_summary.get("metadata_count", 0), 0)
         st.sidebar.success(
-            f"読み込み成功: {line_summary['created_count']}件 / "
+            f"{import_mode}: {line_summary['created_count']}件 / "
             f"スキップ: {line_summary['skipped_count']}件 / "
             f"メタデータなし: {no_metadata_count}件"
         )
         if import_summary.get("warnings"):
             st.sidebar.warning(f"警告: {len(import_summary['warnings'])}件のPNGを確認してください。")
+        if line_summary.get("path_warning_count"):
+            st.sidebar.warning(f"読み込みフォルダ外の画像パスを検出しました: {line_summary['path_warning_count']}件")
         if line_summary["created_count"] == 0:
             st.sidebar.info("生成ソース（プロンプト）を復元できるPNGメタデータが見つかりませんでした。")
     else:
@@ -2138,16 +2199,20 @@ with col2:
             img_c1, img_c2 = st.columns(2)
             with img_c1:
                 st.caption("元のイラスト")
-                if target_line.image_path and os.path.exists(target_line.image_path):
-                    st.image(target_line.image_path, width="stretch")
+                reference_image_path = _existing_project_image_path(getattr(target_line, "image_path", None), project)
+                if reference_image_path:
+                    st.image(reference_image_path, width="stretch")
                 else:
                     st.info("元のイラストはありません。")
+                    show_missing_image_debug(getattr(target_line, "image_path", None), project)
             with img_c2:
                 st.caption("出力対象イラスト")
-                if getattr(target_line, "generated_image_path", None) and os.path.exists(target_line.generated_image_path):
-                    st.image(target_line.generated_image_path, width="stretch")
+                output_image_path = _existing_project_image_path(getattr(target_line, "generated_image_path", None), project)
+                if output_image_path:
+                    st.image(output_image_path, width="stretch")
                 else:
                     st.info("出力対象イラストはまだ選択されていません。")
+                    show_missing_image_debug(getattr(target_line, "generated_image_path", None), project)
 
             st.markdown("#### 生成ソース（プロンプト）")
             st.caption("中央のグラフやPromptCloudからワードを選択すると、このイラストの生成ソース内で該当語が強調表示されます。")
@@ -2247,34 +2312,34 @@ with col2:
             st.markdown("#### 候補イラスト管理")
             st.caption("候補を比較し、出力対象イラストまたは次の生成に使う元のイラストとして設定できます。")
             candidates = list(_get_line_generated_candidates(target_line))
-            existing_candidates = [
-                candidate
-                for candidate in candidates
-                if _candidate_path(candidate) and os.path.exists(_candidate_path(candidate))
-            ]
-            missing_candidates = [
-                candidate
-                for candidate in candidates
-                if _candidate_path(candidate) and not os.path.exists(_candidate_path(candidate))
-            ]
+            existing_candidates = []
+            missing_candidates = []
+            for candidate in candidates:
+                candidate_path = _candidate_path(candidate)
+                if not candidate_path:
+                    continue
+                resolved_candidate_path = _existing_project_image_path(candidate_path, project)
+                if resolved_candidate_path:
+                    existing_candidates.append((candidate, candidate_path, resolved_candidate_path))
+                else:
+                    missing_candidates.append(candidate)
             if missing_candidates:
                 st.caption(f"保存済み候補パスのうち {len(missing_candidates)} 件が見つかりません。")
 
             if existing_candidates:
                 with st.expander("候補イラスト", expanded=True):
-                    for candidate_index, candidate in enumerate(reversed(existing_candidates)):
-                        candidate_path = _candidate_path(candidate)
-                        st.image(candidate_path, width="stretch")
-                        st.caption(candidate_path)
+                    for candidate_index, (candidate, stored_candidate_path, resolved_candidate_path) in enumerate(reversed(existing_candidates)):
+                        st.image(resolved_candidate_path, width="stretch")
+                        st.caption(stored_candidate_path)
                         ca, cr = st.columns(2)
                         with ca:
                             if st.button("出力対象イラストにする", key=f"after_{target_line.id}_{candidate_index}"):
-                                set_candidate_as_after(target_line, candidate_path)
+                                set_candidate_as_after(target_line, stored_candidate_path)
                                 st.success("出力対象イラストに設定しました。")
                                 st.rerun()
                         with cr:
                             if st.button("元のイラストにする", key=f"ref_{target_line.id}_{candidate_index}"):
-                                set_candidate_as_reference(target_line, candidate_path)
+                                set_candidate_as_reference(target_line, stored_candidate_path)
                                 st.success("元のイラストに設定しました。")
                                 st.rerun()
             else:
@@ -2305,6 +2370,7 @@ with col2:
                         st.image(thumbnail_path, width=72)
                     else:
                         st.caption("画像なし")
+                        show_missing_image_debug(getattr(l, "image_path", None), project)
 
                 with col_exp:
                     with st.expander(title):
@@ -2312,13 +2378,15 @@ with col2:
                             st.session_state.focused_line_id = l.id
                             st.rerun()
                             
-                        if l.image_path and os.path.exists(l.image_path):
+                        line_image_path = _existing_project_image_path(getattr(l, "image_path", None), project)
+                        if line_image_path:
                             c_img, c_txt = st.columns([1, 2])
                             with c_img:
-                                st.image(l.image_path, width="stretch")
+                                st.image(line_image_path, width="stretch")
                             with c_txt:
                                 new_text = st.text_area("生成ソース", l.current_text, key=f"text_{l.id}", label_visibility="collapsed")
                         else:
+                            show_missing_image_debug(getattr(l, "image_path", None), project)
                             new_text = st.text_area("生成ソース", l.current_text, key=f"text_{l.id}")
                             
                         if new_text != l.current_text:

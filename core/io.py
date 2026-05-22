@@ -528,6 +528,8 @@ def scan_image_directory_metadata(source_directory: str) -> dict:
             has_comfy_workflow = _has_comfy_workflow_metadata(metadata)
             image_info = {
                 "path": image_path,
+                "current_path": image_path,
+                "scan_root": os.path.abspath(root),
                 "filename": file_name,
                 "extension": extension,
                 "size_bytes": stat.st_size,
@@ -581,6 +583,47 @@ def _latest_image_metadata_import(project: Project) -> dict | None:
 def _image_import_prompt_text(image_info: dict) -> str:
     return str(image_info.get("prompt_text") or image_info.get("prompt_preview") or "").strip()
 
+def _is_path_under_directory(path: str, directory: str) -> bool:
+    if not path or not directory:
+        return False
+    try:
+        normalized_path = os.path.normcase(os.path.abspath(os.path.expanduser(path)))
+        normalized_directory = os.path.normcase(os.path.abspath(os.path.expanduser(directory)))
+        return os.path.commonpath([normalized_path, normalized_directory]) == normalized_directory
+    except (OSError, ValueError):
+        return False
+
+def _current_import_file_name(image_info: dict) -> str:
+    file_name = str(image_info.get("filename") or "").strip()
+    if file_name:
+        return os.path.basename(file_name)
+    for key in ("current_path", "path"):
+        path = str(image_info.get(key) or "").strip()
+        if path:
+            return os.path.basename(path)
+    return "image"
+
+def _current_import_image_path(image_info: dict, source_directory: str) -> tuple[str, str]:
+    file_name = _current_import_file_name(image_info)
+    if source_directory and file_name:
+        source_file_path = os.path.abspath(os.path.join(source_directory, file_name))
+        if os.path.exists(source_file_path):
+            return source_file_path, ""
+
+    for key in ("current_path", "path"):
+        path = str(image_info.get(key) or "").strip()
+        if not path:
+            continue
+        path = os.path.abspath(os.path.expanduser(path))
+        if os.path.exists(path):
+            warning = "" if _is_path_under_directory(path, source_directory) else f"Imported image path is outside source directory: {path}"
+            return path, warning
+
+    if source_directory and file_name:
+        return os.path.abspath(os.path.join(source_directory, file_name)), ""
+    return "", ""
+
+
 def summarize_image_metadata_line_import(project: Project) -> dict:
     latest_import = _latest_image_metadata_import(project)
     images = latest_import.get("images", []) if latest_import else []
@@ -617,6 +660,9 @@ def create_prompt_lines_from_latest_image_import(project: Project) -> tuple[Proj
     sequence = 1
     created_count = 0
     skipped_count = 0
+    path_warning_count = 0
+    path_warnings = []
+    source_directory = str(latest_import.get("source_directory") or getattr(project, "source_directory", "") or "").strip()
 
     for image_info in latest_import.get("images", []):
         if not isinstance(image_info, dict):
@@ -630,15 +676,19 @@ def create_prompt_lines_from_latest_image_import(project: Project) -> tuple[Proj
 
         line_index = start_index + created_count
         line_id, sequence = _next_image_metadata_line_id(existing_ids, sequence)
+        current_image_path, path_warning = _current_import_image_path(image_info, source_directory)
+        if path_warning:
+            path_warning_count += 1
+            path_warnings.append(path_warning)
         prompt_line = PromptLine(
             id=line_id,
-            original_file_name=str(image_info.get("filename") or os.path.basename(image_info.get("path", "")) or "image"),
+            original_file_name=_current_import_file_name(image_info),
             original_index=line_index,
             current_index=line_index,
             original_text=prompt_text,
             current_text=prompt_text,
             tokens=parse_prompt(prompt_text),
-            image_path=image_info.get("path"),
+            image_path=current_image_path,
         )
         prompt_line.negative_prompt = str(image_info.get("negative_prompt") or "").strip()
         project.prompt_lines.append(prompt_line)
@@ -648,6 +698,8 @@ def create_prompt_lines_from_latest_image_import(project: Project) -> tuple[Proj
     return project, {
         "created_count": created_count,
         "skipped_count": skipped_count,
+        "path_warning_count": path_warning_count,
+        "path_warnings": path_warnings,
         "has_import": True,
     }
 
@@ -750,17 +802,73 @@ def _unique_export_dir(output_dir: str) -> str:
             return candidate
         suffix += 1
 
-def _resolve_export_image_path(project: Project, image_path: str) -> str:
+def _append_unique_path(paths: list[str], path: str) -> None:
+    if path and path not in paths:
+        paths.append(path)
+
+def image_path_resolution_attempts(
+    project: Project,
+    image_path: str,
+) -> list[str]:
     if not image_path:
+        return []
+
+    raw_path = str(image_path)
+    normalized_path = os.path.normpath(os.path.expanduser(raw_path))
+    source_directory = getattr(project, "source_directory", "") if project else ""
+    source_directory = os.path.normpath(os.path.expanduser(source_directory)) if source_directory else ""
+    attempts = []
+
+    _append_unique_path(attempts, raw_path)
+    _append_unique_path(attempts, os.path.abspath(normalized_path))
+
+    if source_directory and not os.path.isabs(normalized_path):
+        _append_unique_path(attempts, os.path.abspath(os.path.join(source_directory, normalized_path)))
+
+    basename = os.path.basename(normalized_path)
+    if source_directory and basename:
+        _append_unique_path(attempts, os.path.abspath(os.path.join(source_directory, basename)))
+
+    return attempts
+
+def _find_image_by_basename(
+    source_directory: str,
+    basename: str,
+    max_recursive_files: int = 2000,
+) -> str:
+    if not source_directory or not basename or not os.path.isdir(source_directory):
         return ""
-    if os.path.exists(image_path):
-        return os.path.abspath(image_path)
-    if os.path.isabs(image_path):
-        return image_path
-    source_directory = getattr(project, "source_directory", "") or ""
-    if source_directory:
-        return os.path.abspath(os.path.join(source_directory, image_path))
-    return image_path
+
+    scanned_files = 0
+    for root, _, files in os.walk(source_directory):
+        scanned_files += len(files)
+        if scanned_files > max_recursive_files:
+            return ""
+        if basename in files:
+            return os.path.abspath(os.path.join(root, basename))
+    return ""
+
+def resolve_project_image_path(
+    project: Project,
+    image_path: str,
+    recursive_basename_search: bool = False,
+) -> str:
+    attempts = image_path_resolution_attempts(project, image_path)
+    for path in attempts:
+        if os.path.exists(path):
+            return os.path.abspath(path)
+
+    if recursive_basename_search and image_path:
+        normalized_path = os.path.normpath(os.path.expanduser(str(image_path)))
+        source_directory = getattr(project, "source_directory", "") if project else ""
+        source_directory = os.path.normpath(os.path.expanduser(source_directory)) if source_directory else ""
+        found_path = _find_image_by_basename(source_directory, os.path.basename(normalized_path))
+        if found_path:
+            return found_path
+    return ""
+
+def _resolve_export_image_path(project: Project, image_path: str) -> str:
+    return resolve_project_image_path(project, image_path, recursive_basename_search=True)
 
 def _selected_export_image(project: Project, line: PromptLine) -> tuple[str, str]:
     choices = (
