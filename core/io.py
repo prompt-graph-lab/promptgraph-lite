@@ -528,6 +528,7 @@ def scan_image_directory_metadata(source_directory: str) -> dict:
             has_comfy_workflow = _has_comfy_workflow_metadata(metadata)
             image_info = {
                 "path": image_path,
+                "current_path": image_path,
                 "filename": file_name,
                 "extension": extension,
                 "size_bytes": stat.st_size,
@@ -638,7 +639,7 @@ def create_prompt_lines_from_latest_image_import(project: Project) -> tuple[Proj
             original_text=prompt_text,
             current_text=prompt_text,
             tokens=parse_prompt(prompt_text),
-            image_path=image_info.get("path"),
+            image_path=image_info.get("current_path") or image_info.get("path"),
         )
         prompt_line.negative_prompt = str(image_info.get("negative_prompt") or "").strip()
         project.prompt_lines.append(prompt_line)
@@ -757,8 +758,6 @@ def _append_unique_path(paths: list[str], path: str) -> None:
 def image_path_resolution_attempts(
     project: Project,
     image_path: str,
-    recursive_basename_search: bool = False,
-    max_recursive_files: int = 2000,
 ) -> list[str]:
     if not image_path:
         return []
@@ -779,26 +778,42 @@ def image_path_resolution_attempts(
     if source_directory and basename:
         _append_unique_path(attempts, os.path.abspath(os.path.join(source_directory, basename)))
 
-    if recursive_basename_search and source_directory and basename and os.path.isdir(source_directory):
-        scanned_files = 0
-        for root, _, files in os.walk(source_directory):
-            scanned_files += len(files)
-            if scanned_files > max_recursive_files:
-                break
-            if basename in files:
-                _append_unique_path(attempts, os.path.abspath(os.path.join(root, basename)))
-                break
-
     return attempts
+
+def _find_image_by_basename(
+    source_directory: str,
+    basename: str,
+    max_recursive_files: int = 2000,
+) -> str:
+    if not source_directory or not basename or not os.path.isdir(source_directory):
+        return ""
+
+    scanned_files = 0
+    for root, _, files in os.walk(source_directory):
+        scanned_files += len(files)
+        if scanned_files > max_recursive_files:
+            return ""
+        if basename in files:
+            return os.path.abspath(os.path.join(root, basename))
+    return ""
 
 def resolve_project_image_path(
     project: Project,
     image_path: str,
     recursive_basename_search: bool = False,
 ) -> str:
-    for path in image_path_resolution_attempts(project, image_path, recursive_basename_search):
+    attempts = image_path_resolution_attempts(project, image_path)
+    for path in attempts:
         if os.path.exists(path):
             return os.path.abspath(path)
+
+    if recursive_basename_search and image_path:
+        normalized_path = os.path.normpath(os.path.expanduser(str(image_path)))
+        source_directory = getattr(project, "source_directory", "") if project else ""
+        source_directory = os.path.normpath(os.path.expanduser(source_directory)) if source_directory else ""
+        found_path = _find_image_by_basename(source_directory, os.path.basename(normalized_path))
+        if found_path:
+            return found_path
     return ""
 
 def _resolve_export_image_path(project: Project, image_path: str) -> str:

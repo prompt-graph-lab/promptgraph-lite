@@ -528,7 +528,7 @@ def _existing_project_image_path(path: str, project=None) -> str:
     return resolve_project_image_path(project, path, recursive_basename_search=True)
 
 def _last_image_path_attempt(path: str, project=None) -> str:
-    attempts = image_path_resolution_attempts(project, path, recursive_basename_search=True)
+    attempts = image_path_resolution_attempts(project, path)
     return attempts[-1] if attempts else ""
 
 def show_missing_image_debug(path: str, project=None) -> None:
@@ -2262,7 +2262,7 @@ with col2:
                     continue
                 resolved_candidate_path = _existing_project_image_path(candidate_path, project)
                 if resolved_candidate_path:
-                    existing_candidates.append((candidate, resolved_candidate_path))
+                    existing_candidates.append((candidate, candidate_path, resolved_candidate_path))
                 else:
                     missing_candidates.append(candidate)
             if missing_candidates:
@@ -2270,18 +2270,18 @@ with col2:
 
             if existing_candidates:
                 with st.expander("候補イラスト", expanded=True):
-                    for candidate_index, (candidate, candidate_path) in enumerate(reversed(existing_candidates)):
-                        st.image(candidate_path, width="stretch")
-                        st.caption(candidate_path)
+                    for candidate_index, (candidate, stored_candidate_path, resolved_candidate_path) in enumerate(reversed(existing_candidates)):
+                        st.image(resolved_candidate_path, width="stretch")
+                        st.caption(stored_candidate_path)
                         ca, cr = st.columns(2)
                         with ca:
                             if st.button("出力対象イラストにする", key=f"after_{target_line.id}_{candidate_index}"):
-                                set_candidate_as_after(target_line, candidate_path)
+                                set_candidate_as_after(target_line, stored_candidate_path)
                                 st.success("出力対象イラストに設定しました。")
                                 st.rerun()
                         with cr:
                             if st.button("元のイラストにする", key=f"ref_{target_line.id}_{candidate_index}"):
-                                set_candidate_as_reference(target_line, candidate_path)
+                                set_candidate_as_reference(target_line, stored_candidate_path)
                                 st.success("元のイラストに設定しました。")
                                 st.rerun()
             else:
