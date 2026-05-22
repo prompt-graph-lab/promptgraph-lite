@@ -904,14 +904,8 @@ def render_illustration_selection_mode(project) -> None:
     delete_candidate_ids = [line_id for line_id, selected in candidates.items() if selected]
     st.subheader("ギャラリー編集モード")
     st.caption("画像を見ながら順番調整、削除候補の選別、生成ソース編集、単発生成を行います。")
-    top_left, top_right = st.columns([1, 1])
-    with top_left:
-        st.write(f"削除候補: {len(delete_candidate_ids)}件")
-        st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
-    with top_right:
-        if st.button("通常表示に戻る", type="secondary", key="gallery_exit_inside_top"):
-            st.session_state.selection_mode_enabled = False
-            st.rerun()
+    st.write(f"削除候補: {len(delete_candidate_ids)}件")
+    st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
 
     if st.button("削除候補をまとめて削除", type="primary", disabled=not delete_candidate_ids, key="gallery_delete_top"):
         deleted_count = delete_lines(delete_candidate_ids)
