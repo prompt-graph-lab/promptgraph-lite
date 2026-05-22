@@ -928,6 +928,12 @@ def _save_export_image(
         return "copied"
 
     with Image.open(image_path) as image:
+        image.load()
+        if image.mode == "P" and "transparency" in image.info:
+            clean_image = image.convert("RGBA")
+        else:
+            clean_image = image.copy()
+        clean_image.info.clear()
         save_kwargs = {}
         pnginfo = PngInfo()
         source_metadata = _text_metadata_items(getattr(image, "info", {}))
@@ -943,7 +949,7 @@ def _save_export_image(
                     continue
                 pnginfo.add_text(key, value)
         save_kwargs["pnginfo"] = pnginfo
-        image.save(output_image_path, format=image.format, **save_kwargs)
+        clean_image.save(output_image_path, format="PNG", **save_kwargs)
     return "resaved"
 
 def export_prompt_image_set(
