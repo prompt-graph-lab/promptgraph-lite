@@ -683,6 +683,16 @@ def request_gallery_action(action: str, line_id: str, prompt_text: str) -> None:
         "prompt_text": prompt_text,
     }
 
+def validate_lite_module_text_edit(old_text: str, new_text: str) -> bool:
+    if st.session_state.edition != "FREE":
+        return True
+    old_structure = extract_module_structure_from_text(old_text)
+    new_structure = extract_module_structure_from_text(new_text)
+    if old_structure == new_structure:
+        return True
+    st.error("Lite版ではModuleタグの追加・削除・変更はできません。")
+    return False
+
 def process_pending_gallery_action() -> None:
     pending = st.session_state.get("pending_gallery_action")
     if not isinstance(pending, dict):
@@ -705,6 +715,8 @@ def process_pending_gallery_action() -> None:
 
     st.session_state.gallery_expanded_line_id = line_id
     if action == "save":
+        if not validate_lite_module_text_edit(getattr(target_line, "current_text", ""), prompt_text):
+            return
         update_line_text(line_id, prompt_text)
         st.session_state.branch_feedback = "生成ソースを保存しました。"
         return
@@ -714,6 +726,8 @@ def process_pending_gallery_action() -> None:
 
     try:
         if prompt_text != getattr(target_line, "current_text", ""):
+            if not validate_lite_module_text_edit(getattr(target_line, "current_text", ""), prompt_text):
+                return
             update_line_text(line_id, prompt_text)
             target_line = next(
                 line for line in st.session_state.project.prompt_lines
