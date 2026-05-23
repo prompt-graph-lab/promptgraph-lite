@@ -4,7 +4,7 @@ from core.io import load_directory, export_to_txt, export_prompt_image_set, save
 from core.graph_builder import build_graph
 from core.operations import rename_node, delete_nodes, insert_node, duplicate_nodes, move_nodes, merge_duplicates_in_line, merge_duplicates_all_lines, apply_node_weight, insert_subgraph, replace_with_subgraph, rename_word_global, delete_word_global, insert_word_global, count_matches, get_available_modules, get_active_tokens, get_display_tokens, get_display_tokens_from_text, extract_module_structure_from_text
 from core.parser import parse_prompt
-from core.project import Project
+from core.project import Project, PromptLine
 import streamlit.components.v1 as components
 import os
 import uuid
@@ -753,6 +753,54 @@ def validate_lite_module_text_edit(old_text: str, new_text: str) -> bool:
     st.error("Lite版ではModuleタグの追加・削除・変更はできません。")
     return False
 
+def create_prompt_line_from_text(prompt_text: str) -> str | None:
+    clean_text = (prompt_text or "").strip()
+    if not clean_text:
+        st.warning("生成ソース（プロンプト）を入力してください。")
+        return None
+    if not validate_lite_module_text_edit("", clean_text):
+        return None
+
+    push_history()
+    project = st.session_state.project
+    index = len(getattr(project, "prompt_lines", []))
+    line_id = f"prompt_{uuid.uuid4().hex[:8]}"
+    line_name = f"prompt_line_{index + 1:04d}"
+    new_line = PromptLine(
+        id=line_id,
+        original_file_name=line_name,
+        original_index=index,
+        current_index=index,
+        original_text=clean_text,
+        current_text=clean_text,
+        tokens=parse_prompt(clean_text),
+        image_path=None,
+    )
+    new_line.edited = True
+    project.prompt_lines.append(new_line)
+    for i, line in enumerate(project.prompt_lines):
+        line.current_index = i
+    st.session_state.project = build_graph(project)
+    st.session_state.gallery_expanded_line_id = line_id
+    st.session_state.focused_line_id = None
+    st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+    sync_text_areas()
+    autosave_current_project("生成ソースからイラストを追加")
+    return line_id
+
+def render_raw_prompt_line_creator(project, expanded: bool = False) -> None:
+    with st.expander("生成ソース（プロンプト）からイラストを追加", expanded=expanded):
+        st.caption("画像なしのイラスト行を追加します。追加後にComfyUIで候補イラストを生成できます。")
+        prompt_text = st.text_area(
+            "生成ソース（プロンプト）",
+            key="gallery_raw_prompt_text",
+            height=180,
+        )
+        if st.button("プロンプトからイラストを追加", type="primary", key="gallery_add_prompt_line"):
+            if create_prompt_line_from_text(prompt_text):
+                st.success("生成ソース（プロンプト）からイラストを追加しました。")
+                st.rerun()
+
 def process_pending_gallery_action(show_inline_progress: bool = False) -> None:
     pending = st.session_state.get("pending_gallery_action")
     if not isinstance(pending, dict):
@@ -996,9 +1044,15 @@ def render_illustration_selection_mode(project) -> None:
             st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
         st.rerun()
 
+    render_raw_prompt_line_creator(project, expanded=not active_lines)
+
     st.write("---")
     if not active_lines:
-        st.info("表示できるイラストがありません。")
+        st.info(
+            "まだイラストがありません。\n\n"
+            "生成ソース（プロンプト）を入力するか、左メニューからメタ情報付きPNGイラスト、"
+            "または生成ソース（プロンプト）を読み込んでください。"
+        )
         return
 
     pending_gallery_action = st.session_state.get("pending_gallery_action")
@@ -1028,16 +1082,22 @@ def render_illustration_selection_mode(project) -> None:
                 st.session_state.selection_mode_delete_candidates[line.id] = checked
                 move_cols = st.columns(2)
                 with move_cols[0]:
-                    if st.button("↑", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
+                    if st.button("←", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
                         if move_line(line.id, visible_line_ids, "up"):
                             st.rerun()
                 with move_cols[1]:
-                    if st.button("↓", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
+                    if st.button("→", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
                         if move_line(line.id, visible_line_ids, "down"):
                             st.rerun()
-                if st.button("編集", key=f"gallery_edit_{line.id}"):
-                    st.session_state.gallery_expanded_line_id = None if expanded_line_id == line.id else line.id
-                    st.rerun()
+                action_cols = st.columns(2)
+                with action_cols[0]:
+                    if st.button("編集", key=f"gallery_edit_{line.id}"):
+                        st.session_state.gallery_expanded_line_id = None if expanded_line_id == line.id else line.id
+                        st.rerun()
+                with action_cols[1]:
+                    if st.button("削除", key=f"gallery_delete_line_{line.id}", help="元画像ファイルは削除されません。"):
+                        delete_line(line.id)
+                        st.rerun()
 
         row_expanded = next((line for line in row_lines if line.id == st.session_state.get("gallery_expanded_line_id")), None)
         if row_expanded:

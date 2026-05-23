@@ -11,6 +11,83 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+IMAGE_LIST_KEYS = {"images", "gifs"}
+
+def _is_image_info(value):
+    return isinstance(value, dict) and "filename" in value
+
+def _collect_image_infos(value, path=""):
+    image_infos = []
+    image_like_paths = []
+    if isinstance(value, dict):
+        if _is_image_info(value):
+            image_infos.append(value)
+            image_like_paths.append(path or "<root>")
+        for key, nested in value.items():
+            nested_path = f"{path}.{key}" if path else str(key)
+            if key in IMAGE_LIST_KEYS and isinstance(nested, list):
+                for index, item in enumerate(nested):
+                    item_path = f"{nested_path}[{index}]"
+                    if _is_image_info(item):
+                        image_infos.append(item)
+                        image_like_paths.append(item_path)
+                    else:
+                        nested_infos, nested_paths = _collect_image_infos(item, item_path)
+                        image_infos.extend(nested_infos)
+                        image_like_paths.extend(nested_paths)
+            else:
+                nested_infos, nested_paths = _collect_image_infos(nested, nested_path)
+                image_infos.extend(nested_infos)
+                image_like_paths.extend(nested_paths)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            nested_infos, nested_paths = _collect_image_infos(item, f"{path}[{index}]")
+            image_infos.extend(nested_infos)
+            image_like_paths.extend(nested_paths)
+    return image_infos, image_like_paths
+
+def _workflow_save_image_nodes(workflow_json):
+    node_ids = []
+    if not isinstance(workflow_json, dict):
+        return node_ids
+    target_nodes = workflow_json.get("nodes", workflow_json)
+    if not isinstance(target_nodes, dict):
+        return node_ids
+    for node_id, node_data in target_nodes.items():
+        if not isinstance(node_data, dict):
+            continue
+        class_type = str(node_data.get("class_type") or node_data.get("type") or "")
+        if class_type == "SaveImage" or class_type.endswith(".SaveImage"):
+            node_ids.append(str(node_id))
+    return node_ids
+
+def _history_outputs(history, prompt_id):
+    if not isinstance(history, dict):
+        return {}
+    prompt_history = history.get(prompt_id)
+    if not isinstance(prompt_history, dict) and len(history) == 1:
+        prompt_history = next(iter(history.values()))
+    if not isinstance(prompt_history, dict):
+        return {}
+    outputs = prompt_history.get("outputs", {})
+    return outputs if isinstance(outputs, dict) else {}
+
+def _image_debug_message(history, prompt_id, workflow_json):
+    outputs = _history_outputs(history, prompt_id)
+    output_node_ids = list(outputs.keys())
+    _, image_like_paths = _collect_image_infos(outputs)
+    completed = bool(outputs)
+    if isinstance(history, dict) and isinstance(history.get(prompt_id), dict):
+        completed = True
+    save_nodes = _workflow_save_image_nodes(workflow_json)
+    return (
+        "No image was output by the workflow. "
+        f"prompt_completed={completed}; "
+        f"output_node_ids={output_node_ids or 'none'}; "
+        f"image_like_fields={image_like_paths or 'none'}; "
+        f"save_image_nodes={save_nodes or 'none'}"
+    )
+
 def build_prompt_by_group(project, prompt_line, disabled_modules=None):
     if disabled_modules is None:
         disabled_modules = set()
@@ -175,7 +252,6 @@ def generate_image_with_progress(workflow_json: dict, server_address: str, outpu
     except Exception as e:
         raise Exception(f"Failed to connect to ComfyUI WebSocket: {e}")
         
-    image_info = None
     start_time = time.time()
     
     while True:
@@ -228,14 +304,22 @@ def generate_image_with_progress(workflow_json: dict, server_address: str, outpu
     except Exception as e:
         raise Exception(f"Failed to get history: {e}")
         
-    outputs = history.get(prompt_id, {}).get("outputs", {})
-    for node_id, node_output in outputs.items():
-        if "images" in node_output and len(node_output["images"]) > 0:
-            image_info = node_output["images"][0]
-            break
+    outputs = _history_outputs(history, prompt_id)
+    image_infos = []
+    preferred_node_ids = _workflow_save_image_nodes(workflow_json)
+    for node_id in preferred_node_ids:
+        node_output = outputs.get(str(node_id)) or outputs.get(node_id)
+        node_images, _ = _collect_image_infos(node_output, f"outputs.{node_id}")
+        image_infos.extend(node_images)
+
+    if not image_infos:
+        all_images, _ = _collect_image_infos(outputs, "outputs")
+        image_infos.extend(all_images)
             
-    if not image_info:
-        raise Exception("No image was output by the workflow. Make sure there is a SaveImage node.")
+    if not image_infos:
+        raise Exception(_image_debug_message(history, prompt_id, workflow_json))
+
+    image_info = image_infos[-1]
         
     filename = image_info["filename"]
     subfolder = image_info.get("subfolder", "")
