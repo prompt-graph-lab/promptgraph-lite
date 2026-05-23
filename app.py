@@ -659,6 +659,62 @@ def continue_story_from_line(line_id: str) -> str | None:
     autosave_current_project("このルートの次のイラストを作成")
     return new_line_id
 
+def insert_candidate_after_line(
+    line_id: str,
+    candidate_image_path: str,
+    add_to_source_candidates: bool = False,
+) -> str | None:
+    source_line = next((line for line in st.session_state.project.prompt_lines if line.id == line_id), None)
+    if not source_line or not candidate_image_path:
+        return None
+
+    push_history()
+    if add_to_source_candidates:
+        add_candidate_image(source_line, candidate_image_path)
+
+    new_lines = []
+    new_line_id = None
+    prompt_text = getattr(source_line, "current_text", "") or ""
+    candidate_name = os.path.basename(str(candidate_image_path)) or getattr(source_line, "original_file_name", "")
+
+    for line in st.session_state.project.prompt_lines:
+        new_lines.append(line)
+        if line.id == line_id:
+            new_line = copy.deepcopy(source_line)
+            new_line.id = f"line_{uuid.uuid4().hex[:8]}"
+            new_line.original_file_name = candidate_name
+            new_line.original_text = prompt_text
+            new_line.current_text = prompt_text
+            new_line.tokens = parse_prompt(prompt_text)
+            new_line.duplicated_from = source_line.id
+            new_line.continued_from = source_line.id
+            new_line.inserted_from_candidate = source_line.id
+            new_line.candidate_source_path = candidate_image_path
+            new_line.edited = True
+            new_line.deleted = False
+            new_line.image_path = candidate_image_path
+            new_line.generated_image_path = None
+            new_line.generated_candidates = []
+            new_line.candidate_image_paths = []
+            new_line.selected_candidate_path = None
+            new_line_id = new_line.id
+            new_lines.append(new_line)
+
+    if not new_line_id:
+        return None
+
+    st.session_state.project.prompt_lines = new_lines
+    for i, l in enumerate(st.session_state.project.prompt_lines):
+        l.current_index = i
+
+    st.session_state.project = build_graph(st.session_state.project)
+    restore_focus_after_graph_update(None)
+    st.session_state.selected_node_ids = [nid for nid in st.session_state.selected_node_ids if nid in st.session_state.project.nodes]
+    st.session_state.gallery_expanded_line_id = new_line_id
+    sync_text_areas()
+    autosave_current_project("候補イラストを本編列へ追加")
+    return new_line_id
+
 def request_focus_action(action: str, line_id: str) -> None:
     st.session_state.pending_focus_action = {"action": action, "line_id": line_id}
 
@@ -758,8 +814,10 @@ def process_pending_gallery_action(show_inline_progress: bool = False) -> None:
             if status.get("type") == "done":
                 gen_path = status.get("path")
         if gen_path:
-            set_candidate_as_after(target_line, gen_path)
-            st.session_state.branch_feedback = "候補イラストを生成し、出力対象に設定しました。"
+            push_history()
+            add_candidate_image(target_line, gen_path)
+            autosave_current_project("候補イラストを生成")
+            st.session_state.branch_feedback = "候補イラストを生成しました。必要な候補は本編列へ直後追加できます。"
     except Exception as exc:
         st.error(f"単発生成に失敗しました: {exc}")
 
@@ -850,7 +908,7 @@ def render_gallery_line_editor(line, project) -> None:
             request_gallery_action("generate", line.id, edit_text)
             st.rerun()
     with action_cols[2]:
-        st.caption("生成結果は候補イラストとして保存し、このイラストの出力対象にも設定します。")
+        st.caption("生成結果は候補イラストとして保存します。必要な候補は本編イラスト列へ直後追加できます。")
 
     candidate_items = get_line_candidate_items(line, project)
     if candidate_items:
@@ -860,9 +918,11 @@ def render_gallery_line_editor(line, project) -> None:
             with candidate_cols[index % 4]:
                 st.image(resolved_path, width=160)
                 is_output = is_line_output_path(line, stored_path, project)
-                st.caption("出力対象" if is_output else "候補")
-                if st.button("出力対象にする", key=f"gallery_output_{line.id}_{index}"):
-                    set_candidate_as_after(line, stored_path)
+                st.caption("旧出力対象" if is_output else "候補")
+                if st.button("この候補を直後に追加", key=f"gallery_output_{line.id}_{index}"):
+                    new_line_id = insert_candidate_after_line(line.id, stored_path)
+                    if new_line_id:
+                        st.success("候補イラストを本編列の直後に追加しました。")
                     st.rerun()
     else:
         st.caption("候補イラストはまだありません。")
@@ -895,13 +955,18 @@ def render_gallery_line_editor(line, project) -> None:
                     st.success("候補イラストを追加しました。")
                 st.rerun()
     with add_output_col:
-        if st.button("追加して出力対象にする", key=f"gallery_add_candidate_output_{line.id}"):
+        if st.button("追加して直後に追加", key=f"gallery_add_candidate_output_{line.id}"):
             candidate_path, error = validate_manual_candidate_path(manual_candidate_path, project)
             if error:
                 st.warning(error)
             else:
-                set_candidate_as_after(line, candidate_path)
-                st.success("候補イラストを追加し、出力対象に設定しました。")
+                new_line_id = insert_candidate_after_line(
+                    line.id,
+                    candidate_path,
+                    add_to_source_candidates=True,
+                )
+                if new_line_id:
+                    st.success("候補イラストを追加し、本編列の直後に追加しました。")
                 st.rerun()
 
 def render_illustration_selection_mode(project) -> None:
@@ -1565,8 +1630,8 @@ if st.session_state.show_tutorial:
     **イラストを1つ選び、生成ソース（プロンプト）を編集します。**
     イラスト一覧から対象を選び、差分イラストや、このルートの次のイラストを作成します。
 
-    **候補イラストを生成・比較し、出力対象イラストを残します。**
-    出力対象イラストや元のイラストを選び、生成ソースをTXTとして出力できます。
+    **候補イラストを生成・比較し、必要な候補を本編イラスト列へ追加します。**
+    本編列に入れたイラストと生成ソースをTXTや画像セットとして出力できます。
 
     ---
 
@@ -1695,7 +1760,7 @@ with st.sidebar.expander("プロジェクトを保存", expanded=False):
             st.success("プロジェクトを保存しました。")
 
 with st.sidebar.expander("プロジェクトの統計", expanded=bool(st.session_state.project)):
-    st.caption("有効なイラスト、差分、続き、候補イラスト、出力対象イラストを確認します。")
+    st.caption("有効なイラスト、差分、続き、候補イラスト、本編列に入ったイラストを確認します。")
     st.caption(f"読み込み元: {overview['source_directory'] or '(未設定)'}")
     st.caption(f"プロジェクトJSON: {current_project_path or '(未保存)'}")
     metric_cols = st.columns(2)
@@ -1704,7 +1769,7 @@ with st.sidebar.expander("プロジェクトの統計", expanded=bool(st.session
     metric_cols = st.columns(2)
     metric_cols[0].metric("続き", overview["continued_lines"])
     metric_cols[1].metric("候補イラスト", overview["candidate_images"])
-    st.metric("出力対象イラスト", overview["after_images"])
+    st.metric("旧出力対象イラスト", overview["after_images"])
 
 # Directory loading
 st.sidebar.markdown("---")
@@ -2765,7 +2830,7 @@ with col2:
                 st.rerun()
 
             st.markdown("#### 現在のイラスト")
-            st.caption("元のイラストと出力対象イラストを並べて確認します。")
+            st.caption("元のイラストと、互換用に残っている旧出力対象イラストを確認します。")
             img_c1, img_c2 = st.columns(2)
             with img_c1:
                 st.caption("元のイラスト")
@@ -2776,12 +2841,12 @@ with col2:
                     st.info("元のイラストはありません。")
                     show_missing_image_debug(getattr(target_line, "image_path", None), project)
             with img_c2:
-                st.caption("出力対象イラスト")
+                st.caption("旧出力対象イラスト")
                 output_image_path = _existing_project_image_path(getattr(target_line, "generated_image_path", None), project)
                 if output_image_path:
                     st.image(output_image_path, width="stretch")
                 else:
-                    st.info("出力対象イラストはまだ選択されていません。")
+                    st.info("旧出力対象イラストはまだ選択されていません。")
                     show_missing_image_debug(getattr(target_line, "generated_image_path", None), project)
 
             st.markdown("#### 生成ソース（プロンプト）")
@@ -2868,7 +2933,7 @@ with col2:
                             _make_generated_candidate_record(gen_path, target_line, "single_generate"),
                         )
                         autosave_current_project("候補イラストを生成")
-                        st.success("候補イラストを1枚生成しました。出力対象イラストにする場合は明示的に選択してください。")
+                        st.success("候補イラストを1枚生成しました。必要な候補は本編列へ直後追加できます。")
                         st.rerun()
                 except Exception as e:
                     st.error(f"Liteの単体生成に失敗しました: {e}")
@@ -2876,7 +2941,7 @@ with col2:
             render_lite_comfy_workflow_debug_preview(target_line)
 
             st.markdown("#### 候補イラスト管理")
-            st.caption("候補を比較し、出力対象イラストまたは次の生成に使う元のイラストとして設定できます。")
+            st.caption("候補を比較し、必要な候補を本編イラスト列へ直後追加できます。元のイラストとして使うこともできます。")
             candidates = list(_get_line_generated_candidates(target_line))
             existing_candidates = []
             missing_candidates = []
@@ -2905,9 +2970,10 @@ with col2:
                             with candidate_col:
                                 st.image(resolved_candidate_path, width="stretch")
                                 st.caption(stored_candidate_path)
-                                if st.button("出力対象イラストにする", key=f"after_{target_line.id}_{candidate_index}"):
-                                    set_candidate_as_after(target_line, stored_candidate_path)
-                                    st.success("出力対象イラストに設定しました。")
+                                if st.button("この候補を直後に追加", key=f"after_{target_line.id}_{candidate_index}"):
+                                    new_line_id = insert_candidate_after_line(target_line.id, stored_candidate_path)
+                                    if new_line_id:
+                                        st.success("候補イラストを本編列の直後に追加しました。")
                                     st.rerun()
                                 if st.button("元のイラストにする", key=f"ref_{target_line.id}_{candidate_index}"):
                                     set_candidate_as_reference(target_line, stored_candidate_path)
