@@ -659,12 +659,19 @@ def continue_story_from_line(line_id: str) -> str | None:
     autosave_current_project("このルートの次のイラストを作成")
     return new_line_id
 
-def insert_candidate_after_line(line_id: str, candidate_image_path: str) -> str | None:
+def insert_candidate_after_line(
+    line_id: str,
+    candidate_image_path: str,
+    add_to_source_candidates: bool = False,
+) -> str | None:
     source_line = next((line for line in st.session_state.project.prompt_lines if line.id == line_id), None)
     if not source_line or not candidate_image_path:
         return None
 
     push_history()
+    if add_to_source_candidates:
+        add_candidate_image(source_line, candidate_image_path)
+
     new_lines = []
     new_line_id = None
     prompt_text = getattr(source_line, "current_text", "") or ""
@@ -953,8 +960,11 @@ def render_gallery_line_editor(line, project) -> None:
             if error:
                 st.warning(error)
             else:
-                add_candidate_image(line, candidate_path)
-                new_line_id = insert_candidate_after_line(line.id, candidate_path)
+                new_line_id = insert_candidate_after_line(
+                    line.id,
+                    candidate_path,
+                    add_to_source_candidates=True,
+                )
                 if new_line_id:
                     st.success("候補イラストを追加し、本編列の直後に追加しました。")
                 st.rerun()
