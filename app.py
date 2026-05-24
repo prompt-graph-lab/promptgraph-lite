@@ -1032,21 +1032,8 @@ def render_illustration_selection_mode(project) -> None:
     move_target_ids = [line.id for line in active_lines if move_targets.get(line.id)]
     st.subheader("ギャラリー編集モード")
     st.caption("画像を見ながら順番調整、選択したイラストの移動・削除、生成ソース編集、単発生成を行います。")
-    selection_cols = st.columns([2, 1])
-    with selection_cols[0]:
-        st.write(f"選択: {len(move_target_ids)}件")
-    with selection_cols[1]:
-        if st.button("全解除", key="gallery_clear_move_targets_top", disabled=not move_target_ids):
-            clear_gallery_move_selection()
-            st.rerun()
+    st.write(f"選択: {len(move_target_ids)}件")
     st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
-
-    if st.button("選択をまとめて削除", type="primary", disabled=not move_target_ids, key="gallery_delete_top"):
-        deleted_count = delete_lines(move_target_ids)
-        clear_gallery_move_selection()
-        if deleted_count:
-            st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
-        st.rerun()
 
     render_raw_prompt_line_creator(project, expanded=not active_lines)
 
@@ -1079,13 +1066,19 @@ def render_illustration_selection_mode(project) -> None:
                     is_selected = bool(move_targets.get(line.id, False))
                     if is_selected:
                         st.info("選択中")
-                    select_label = "選択解除" if is_selected else "選択"
-                    if st.button(select_label, key=f"gallery_select_toggle_{line.id}"):
-                        if is_selected:
-                            st.session_state.gallery_move_targets.pop(line.id, None)
-                        else:
-                            st.session_state.gallery_move_targets[line.id] = True
-                        st.rerun()
+                    select_cols = st.columns(2)
+                    with select_cols[0]:
+                        select_label = "解除" if is_selected else "選択"
+                        if st.button(select_label, key=f"gallery_select_toggle_{line.id}"):
+                            if is_selected:
+                                st.session_state.gallery_move_targets.pop(line.id, None)
+                            else:
+                                st.session_state.gallery_move_targets[line.id] = True
+                            st.rerun()
+                    with select_cols[1]:
+                        if st.button("全解除", key=f"gallery_clear_move_targets_{line.id}", disabled=not move_target_ids):
+                            clear_gallery_move_selection()
+                            st.rerun()
                     move_cols = st.columns(2)
                     with move_cols[0]:
                         if st.button("← 前に移動", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
@@ -1095,17 +1088,27 @@ def render_illustration_selection_mode(project) -> None:
                         if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
                             if move_line(line.id, visible_line_ids, "down"):
                                 st.rerun()
-                    if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
-                        if move_selected_lines_after(move_target_ids, line.id):
-                            st.rerun()
-                    action_cols = st.columns(2)
-                    with action_cols[0]:
+                    edit_insert_cols = st.columns(2)
+                    with edit_insert_cols[0]:
                         if st.button("編集", key=f"gallery_edit_{line.id}"):
                             st.session_state.gallery_expanded_line_id = None if expanded_line_id == line.id else line.id
                             st.rerun()
-                    with action_cols[1]:
-                        if st.button("削除", key=f"gallery_delete_line_{line.id}", help="元画像ファイルは削除されません。"):
+                    with edit_insert_cols[1]:
+                        if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
+                            if move_selected_lines_after(move_target_ids, line.id):
+                                st.rerun()
+                    delete_cols = st.columns(2)
+                    with delete_cols[0]:
+                        if st.button("一件削除", key=f"gallery_delete_line_{line.id}", help="元画像ファイルは削除されません。"):
+                            st.session_state.gallery_move_targets.pop(line.id, None)
                             delete_line(line.id)
+                            st.rerun()
+                    with delete_cols[1]:
+                        if st.button("選択を削除", key=f"gallery_delete_selected_{line.id}", disabled=not move_target_ids, help="元画像ファイルは削除されません。"):
+                            deleted_count = delete_lines(move_target_ids)
+                            clear_gallery_move_selection()
+                            if deleted_count:
+                                st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
                             st.rerun()
 
         row_expanded = next((line for line in row_lines if line.id == st.session_state.get("gallery_expanded_line_id")), None)
@@ -1124,18 +1127,9 @@ def render_illustration_selection_mode(project) -> None:
                 st.caption("将来のルート分岐UIでは、分岐イラストの直前にAルート / Bルートの選択ブロックを置ける構造にします。")
 
     st.write("---")
-    bottom_cols = st.columns([1, 1])
-    with bottom_cols[0]:
-        if st.button("選択をまとめて削除", type="primary", disabled=not move_target_ids, key="gallery_delete_bottom"):
-            deleted_count = delete_lines(move_target_ids)
-            clear_gallery_move_selection()
-            if deleted_count:
-                st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
-            st.rerun()
-    with bottom_cols[1]:
-        if st.button("全体編集モードへ", key="gallery_exit_bottom"):
-            st.session_state.selection_mode_enabled = False
-            st.rerun()
+    if st.button("全体編集モードへ", key="gallery_exit_bottom"):
+        st.session_state.selection_mode_enabled = False
+        st.rerun()
 
 def count_line_candidates(line) -> int:
     candidate_paths = []
