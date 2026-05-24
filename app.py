@@ -1031,16 +1031,6 @@ def render_illustration_selection_mode(project) -> None:
             if key.startswith("gallery_move_target_"):
                 del st.session_state[key]
         st.session_state.gallery_clear_move_target_widgets = False
-    candidates = st.session_state.get("selection_mode_delete_candidates", {})
-    if not isinstance(candidates, dict):
-        candidates = {}
-    candidates = {line_id: bool(value) for line_id, value in candidates.items() if line_id in active_ids}
-    for line in active_lines:
-        widget_key = f"selection_mode_delete_{line.id}"
-        if widget_key in st.session_state:
-            candidates[line.id] = bool(st.session_state[widget_key])
-    st.session_state.selection_mode_delete_candidates = candidates
-
     move_targets = st.session_state.get("gallery_move_targets", {})
     if not isinstance(move_targets, dict):
         move_targets = {}
@@ -1051,17 +1041,15 @@ def render_illustration_selection_mode(project) -> None:
             move_targets[line.id] = bool(st.session_state[widget_key])
     st.session_state.gallery_move_targets = move_targets
 
-    delete_candidate_ids = [line_id for line_id, selected in candidates.items() if selected]
     move_target_ids = [line.id for line in active_lines if move_targets.get(line.id)]
     st.subheader("ギャラリー編集モード")
-    st.caption("画像を見ながら順番調整、削除候補の選別、生成ソース編集、単発生成を行います。")
-    st.write(f"削除候補: {len(delete_candidate_ids)}件")
-    st.write(f"移動対象: {len(move_target_ids)}件")
+    st.caption("画像を見ながら順番調整、選択したイラストの移動・削除、生成ソース編集、単発生成を行います。")
+    st.write(f"選択: {len(move_target_ids)}件")
     st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
 
-    if st.button("削除候補をまとめて削除", type="primary", disabled=not delete_candidate_ids, key="gallery_delete_top"):
-        deleted_count = delete_lines(delete_candidate_ids)
-        st.session_state.selection_mode_delete_candidates = {}
+    if st.button("選択をまとめて削除", type="primary", disabled=not move_target_ids, key="gallery_delete_top"):
+        deleted_count = delete_lines(move_target_ids)
+        clear_gallery_move_selection()
         if deleted_count:
             st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
         st.rerun()
@@ -1087,54 +1075,48 @@ def render_illustration_selection_mode(project) -> None:
         for offset, line in enumerate(row_lines):
             line_index = row_start + offset
             with cols[offset]:
-                thumbnail_path = get_line_thumbnail_path(line, project)
-                if thumbnail_path:
-                    st.image(thumbnail_path, width="stretch")
-                else:
-                    st.info("画像なし")
-                st.caption(f"{line.current_index + 1:04d} / {line.original_file_name}")
-                prompt_preview = " ".join((getattr(line, "current_text", "") or "").split())
-                if prompt_preview:
-                    st.caption(prompt_preview[:70] + ("..." if len(prompt_preview) > 70 else ""))
-                checked = st.checkbox(
-                    "削除候補",
-                    value=bool(candidates.get(line.id, False)),
-                    key=f"selection_mode_delete_{line.id}",
-                )
-                st.session_state.selection_mode_delete_candidates[line.id] = checked
-                move_checked = st.checkbox(
-                    "移動対象",
-                    value=bool(move_targets.get(line.id, False)),
-                    key=f"gallery_move_target_{line.id}",
-                )
-                st.session_state.gallery_move_targets[line.id] = move_checked
-                move_cols = st.columns(2)
-                with move_cols[0]:
-                    if st.button("← 前に移動", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
-                        if move_line(line.id, visible_line_ids, "up"):
+                with st.container(border=True):
+                    thumbnail_path = get_line_thumbnail_path(line, project)
+                    if thumbnail_path:
+                        st.image(thumbnail_path, width="stretch")
+                    else:
+                        st.info("画像なし")
+                    st.caption(f"{line.current_index + 1:04d} / {line.original_file_name}")
+                    move_checked = st.checkbox(
+                        "選択",
+                        value=bool(move_targets.get(line.id, False)),
+                        key=f"gallery_move_target_{line.id}",
+                    )
+                    st.session_state.gallery_move_targets[line.id] = move_checked
+                    if move_checked:
+                        st.info("選択中")
+                    move_cols = st.columns(2)
+                    with move_cols[0]:
+                        if st.button("← 前に移動", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
+                            if move_line(line.id, visible_line_ids, "up"):
+                                st.rerun()
+                    with move_cols[1]:
+                        if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
+                            if move_line(line.id, visible_line_ids, "down"):
+                                st.rerun()
+                    insert_cols = st.columns(2)
+                    with insert_cols[0]:
+                        if st.button("ここに挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
+                            if move_selected_lines_after(move_target_ids, line.id):
+                                st.rerun()
+                    with insert_cols[1]:
+                        if st.button("解除", key=f"gallery_clear_move_targets_{line.id}", disabled=not move_target_ids):
+                            clear_gallery_move_selection()
                             st.rerun()
-                with move_cols[1]:
-                    if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
-                        if move_line(line.id, visible_line_ids, "down"):
+                    action_cols = st.columns(2)
+                    with action_cols[0]:
+                        if st.button("編集", key=f"gallery_edit_{line.id}"):
+                            st.session_state.gallery_expanded_line_id = None if expanded_line_id == line.id else line.id
                             st.rerun()
-                insert_cols = st.columns(2)
-                with insert_cols[0]:
-                    if st.button("ここに挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
-                        if move_selected_lines_after(move_target_ids, line.id):
+                    with action_cols[1]:
+                        if st.button("削除", key=f"gallery_delete_line_{line.id}", help="元画像ファイルは削除されません。"):
+                            delete_line(line.id)
                             st.rerun()
-                with insert_cols[1]:
-                    if st.button("⚠ 選択全解除", key=f"gallery_clear_move_targets_{line.id}", disabled=not move_target_ids):
-                        clear_gallery_move_selection()
-                        st.rerun()
-                action_cols = st.columns(2)
-                with action_cols[0]:
-                    if st.button("編集", key=f"gallery_edit_{line.id}"):
-                        st.session_state.gallery_expanded_line_id = None if expanded_line_id == line.id else line.id
-                        st.rerun()
-                with action_cols[1]:
-                    if st.button("削除", key=f"gallery_delete_line_{line.id}", help="元画像ファイルは削除されません。"):
-                        delete_line(line.id)
-                        st.rerun()
 
         row_expanded = next((line for line in row_lines if line.id == st.session_state.get("gallery_expanded_line_id")), None)
         if row_expanded:
@@ -1154,9 +1136,9 @@ def render_illustration_selection_mode(project) -> None:
     st.write("---")
     bottom_cols = st.columns([1, 1])
     with bottom_cols[0]:
-        if st.button("削除候補をまとめて削除", type="primary", disabled=not delete_candidate_ids, key="gallery_delete_bottom"):
-            deleted_count = delete_lines(delete_candidate_ids)
-            st.session_state.selection_mode_delete_candidates = {}
+        if st.button("選択をまとめて削除", type="primary", disabled=not move_target_ids, key="gallery_delete_bottom"):
+            deleted_count = delete_lines(move_target_ids)
+            clear_gallery_move_selection()
             if deleted_count:
                 st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
             st.rerun()
@@ -1592,10 +1574,10 @@ def clear_gallery_move_selection() -> None:
 def move_selected_lines_after(selected_line_ids: list[str], target_line_id: str) -> bool:
     selected_ids = {line_id for line_id in selected_line_ids if line_id}
     if not selected_ids:
-        st.warning("移動対象を選択してください。")
+        st.warning("移動するイラストを選択してください。")
         return False
     if target_line_id in selected_ids:
-        st.warning("移動先のイラストが移動対象に含まれています。移動先カードは選択から外してください。")
+        st.warning("移動先のイラストが選択に含まれています。移動先カードは選択から外してください。")
         return False
 
     prompt_lines = st.session_state.project.prompt_lines
@@ -2278,7 +2260,7 @@ with mode_cols[0]:
             st.rerun()
 with mode_cols[1]:
     if st.session_state.selection_mode_enabled:
-        st.caption("画像を見ながら並び替え・削除候補選別・生成ソース編集・候補管理を行います。")
+        st.caption("画像を見ながら並び替え・選択したイラストの移動や削除・生成ソース編集・候補管理を行います。")
     else:
         st.caption("グラフやPromptCloudで、イラスト集全体の生成ソース構造を確認・編集します。")
 
