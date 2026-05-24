@@ -1110,15 +1110,21 @@ def render_illustration_selection_mode(project) -> None:
                 st.session_state.gallery_move_targets[line.id] = move_checked
                 move_cols = st.columns(2)
                 with move_cols[0]:
-                    if st.button("←", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
+                    if st.button("← 前に移動", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
                         if move_line(line.id, visible_line_ids, "up"):
                             st.rerun()
                 with move_cols[1]:
-                    if st.button("→", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
+                    if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
                         if move_line(line.id, visible_line_ids, "down"):
                             st.rerun()
-                if st.button("ここに挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
-                    if move_selected_lines_after(move_target_ids, line.id):
+                insert_cols = st.columns(2)
+                with insert_cols[0]:
+                    if st.button("ここに挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
+                        if move_selected_lines_after(move_target_ids, line.id):
+                            st.rerun()
+                with insert_cols[1]:
+                    if st.button("⚠ 選択全解除", key=f"gallery_clear_move_targets_{line.id}", disabled=not move_target_ids):
+                        clear_gallery_move_selection()
                         st.rerun()
                 action_cols = st.columns(2)
                 with action_cols[0]:
@@ -1579,6 +1585,10 @@ def show_upgrade_dialog(message: str):
     if st.button("閉じる"):
         st.rerun()
 
+def clear_gallery_move_selection() -> None:
+    st.session_state.gallery_move_targets = {}
+    st.session_state.gallery_clear_move_target_widgets = True
+
 def move_selected_lines_after(selected_line_ids: list[str], target_line_id: str) -> bool:
     selected_ids = {line_id for line_id in selected_line_ids if line_id}
     if not selected_ids:
@@ -1624,8 +1634,7 @@ def move_selected_lines_after(selected_line_ids: list[str], target_line_id: str)
         nid for nid in st.session_state.selected_node_ids
         if nid in st.session_state.project.nodes
     ]
-    st.session_state.gallery_move_targets = {}
-    st.session_state.gallery_clear_move_target_widgets = True
+    clear_gallery_move_selection()
     autosave_current_project("選択したイラストをまとめて移動")
     sync_text_areas()
     return True
