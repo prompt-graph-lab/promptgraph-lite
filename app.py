@@ -82,10 +82,6 @@ if "selection_mode_delete_candidates" not in st.session_state:
     st.session_state.selection_mode_delete_candidates = {}
 if "gallery_move_targets" not in st.session_state:
     st.session_state.gallery_move_targets = {}
-if "gallery_clear_move_target_widgets" not in st.session_state:
-    st.session_state.gallery_clear_move_target_widgets = False
-if "gallery_move_target_key_version" not in st.session_state:
-    st.session_state.gallery_move_target_key_version = 0
 if "gallery_expanded_line_id" not in st.session_state:
     st.session_state.gallery_expanded_line_id = None
 
@@ -1027,21 +1023,10 @@ def render_illustration_selection_mode(project) -> None:
     active_lines = [line for line in project.prompt_lines if not getattr(line, "deleted", False)]
     active_ids = {line.id for line in active_lines}
     visible_line_ids = [line.id for line in active_lines]
-    if st.session_state.get("gallery_clear_move_target_widgets"):
-        st.session_state.gallery_move_targets = {}
-        for key in list(st.session_state.keys()):
-            if key.startswith("gallery_move_target_"):
-                del st.session_state[key]
-        st.session_state.gallery_clear_move_target_widgets = False
-    move_key_version = st.session_state.get("gallery_move_target_key_version", 0)
     move_targets = st.session_state.get("gallery_move_targets", {})
     if not isinstance(move_targets, dict):
         move_targets = {}
     move_targets = {line_id: bool(value) for line_id, value in move_targets.items() if line_id in active_ids}
-    for line in active_lines:
-        widget_key = f"gallery_move_target_{move_key_version}_{line.id}"
-        if widget_key in st.session_state:
-            move_targets[line.id] = bool(st.session_state[widget_key])
     st.session_state.gallery_move_targets = move_targets
 
     move_target_ids = [line.id for line in active_lines if move_targets.get(line.id)]
@@ -1085,14 +1070,16 @@ def render_illustration_selection_mode(project) -> None:
                     else:
                         st.info("画像なし")
                     st.caption(f"{line.current_index + 1:04d} / {line.original_file_name}")
-                    move_checked = st.checkbox(
-                        "選択",
-                        value=bool(move_targets.get(line.id, False)),
-                        key=f"gallery_move_target_{move_key_version}_{line.id}",
-                    )
-                    st.session_state.gallery_move_targets[line.id] = move_checked
-                    if move_checked:
+                    is_selected = bool(move_targets.get(line.id, False))
+                    if is_selected:
                         st.info("選択中")
+                    select_label = "選択解除" if is_selected else "選択する"
+                    if st.button(select_label, key=f"gallery_select_toggle_{line.id}"):
+                        if is_selected:
+                            st.session_state.gallery_move_targets.pop(line.id, None)
+                        else:
+                            st.session_state.gallery_move_targets[line.id] = True
+                        st.rerun()
                     move_cols = st.columns(2)
                     with move_cols[0]:
                         if st.button("← 前に移動", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
@@ -1572,8 +1559,6 @@ def show_upgrade_dialog(message: str):
 
 def clear_gallery_move_selection() -> None:
     st.session_state.gallery_move_targets = {}
-    st.session_state.gallery_clear_move_target_widgets = True
-    st.session_state.gallery_move_target_key_version = st.session_state.get("gallery_move_target_key_version", 0) + 1
 
 def move_selected_lines_after(selected_line_ids: list[str], target_line_id: str) -> bool:
     selected_ids = {line_id for line_id in selected_line_ids if line_id}
