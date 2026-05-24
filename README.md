@@ -1,32 +1,36 @@
 # PromptGraph Lite
 
-Lineage-oriented prompt and asset editor for Stable Diffusion workflows.
+Gallery-centered prompt and AI illustration sequence editor for Stable Diffusion / ComfyUI workflows.
 
-PromptGraph Lite helps users import existing AI illustration assets or prompt collections, edit prompt lines as lineage/story units, and export or save the result for long-term reuse.
+PromptGraph Lite helps creators import existing AI illustration assets, review them as an image sequence, edit generation source prompts beside the images, generate candidates, insert good results back into the sequence, and save/export the project for long-term reuse.
 
-Instead of treating prompts as a single long text string,
-PromptGraph approaches prompts as structured editable data.
+Instead of treating prompts as one long disposable text string, PromptGraph treats each illustration and its generation source as a reusable project unit.
 
-The goal is to make prompts:
-- easier to understand
-- easier to organize
-- easier to reuse
-- easier to evolve into scene-oriented workflows
+The goal is to make AI illustration collections:
+- easier to review
+- easier to clean up
+- easier to reorder
+- easier to branch and continue
+- easier to regenerate and export safely
 
-PromptGraph is designed not only for humans,
-but also for future AI-assisted workflows and agent-driven prompt systems.
+PromptGraph remains lineage-oriented, but Lite is now primarily image/gallery-driven. Graph and PromptCloud views still exist for understanding the whole project, while day-to-day editing starts from the gallery.
 
 ---
 
-# Lite Story Workflow
+# Lite Gallery Workflow
 
-PromptGraph Lite is the entry point for the core PromptGraph concept:
+PromptGraph Lite is the entry point for practical illustration-sequence editing.
 
-- **Story Workspace**: Create a dedicated project folder with `project.json` and `generated/`, or open a saved JSON project before editing.
-- **Start from Existing Assets**: Import `.txt` prompt files, same-name PNG/JPG images, and PNG generation metadata from existing illustration folders.
-- **Create & Continue Scenes**: Review Prompt Lineage, Focus Edit one scene, then Branch, Continue Story, or Generate candidates.
-- **Save & Export**: Save the lineage workspace as JSON, export active scene prompts to combined TXT, or export an illustration/source set. Batch generation is Pro-only.
-- **Lineage Preview**: Inspect repeated words, relationships, and future Pro visualization potential.
+The current workflow is:
+
+1. Load an illustration set from folders, prompt text files, PNG metadata, or an existing project.
+2. Review the project in Gallery Edit Mode.
+3. Delete unnecessary illustrations from the active sequence.
+4. Edit generation source prompts inline with each image.
+5. Generate candidate images with ComfyUI, or manually add external candidate images.
+6. Insert good candidates immediately after the source illustration to continue the sequence.
+7. Create branch or continuation variations as alternate illustration routes.
+8. Save the project and export prompt/image sets for reuse or sharing.
 
 Lite is intentionally not a random prompt generator. It is for maintaining, modifying, and reusing existing AI illustration assets and prompt/image collections.
 
@@ -40,102 +44,117 @@ Example:
 
     1girl, smile, outdoors, blue sky, detailed eyes, cinematic lighting...
 
-As prompts become larger and more repetitive:
+As projects become larger and more repetitive:
 - editing becomes difficult
 - reusable structures become hard to manage
-- scene relationships become invisible
+- illustration sequence order becomes unclear
+- candidate outputs become hard to compare
 - workflow organization becomes painful
 
-PromptGraph visualizes prompts as graph structures.
+PromptGraph organizes prompts, images, and generated candidates as a persistent project.
 
 This enables:
-- prompt structure inspection
-- reusable workflow thinking
-- safer editing
-- scene-oriented organization
-- future automation-friendly workflows
+- image-sequence review
+- prompt source editing beside images
+- candidate-based iteration
+- safer project-level cleanup
+- prompt structure inspection through graph and PromptCloud views
+- future route/story workflow support
 
 ---
 
 # Core Concepts
 
-## Prompt Token
+## Illustration Line
 
-PromptGraph internally treats prompts as structured prompt tokens rather than plain text.
+An illustration line is one item in the project sequence.
 
-This allows future support for:
-- token-aware editing
-- structural transformations
-- AI-assisted workflows
-- reusable scene operations
+It can contain:
+- a reference/original image
+- generation source prompt text
+- generated candidate images
+- inserted continuation images
+- metadata imported from generated PNG files
 
----
-
-## Prompt Line
-
-A single generated prompt.
-
-Example:
+Example prompt:
 
     1girl, smile, school uniform, classroom
 
 ---
 
-## Focus Edit Mode
+## Gallery Edit Mode
 
-Focus Edit Mode allows safe editing of a single prompt line.
+Gallery Edit Mode is the main Lite workspace.
 
-Lite edition intentionally emphasizes:
-- controlled editing
-- understanding prompt structure
-- safe local operations
+It is designed for:
+- reviewing illustrations visually
+- selecting and reordering cards
+- deleting unwanted items from the active sequence
+- editing prompts inline
+- generating or adding candidates
+- inserting good candidates into the main illustration sequence
 
-Large-scale destructive editing is intentionally limited in Lite.
-
----
-
-## Graph-Based Editing
-
-PromptGraph visualizes prompts as nodes and edges.
-
-This makes it easier to:
-- understand repeated tokens
-- inspect prompt composition
-- identify reusable elements
-- trace scene structure
-- understand editing scope
+This mode is the default editing surface for Lite.
 
 ---
 
-## Scene-Oriented Workflow
+## Candidate Workflow
 
-PromptGraph is designed around prompt sequences rather than isolated single prompts.
+Candidates are generated or manually added images attached to an illustration line.
 
-Long-term workflow direction includes:
-- scene management
-- sequence editing
-- reusable scene structures
-- character/scene separation
-- AI-assisted prompt generation
+In Lite, a good candidate can be inserted immediately after the current illustration. This keeps the original line intact while adding the chosen result to the main sequence.
+
+This supports practical workflows such as:
+- trying several ComfyUI outputs
+- choosing the best continuation
+- building a story-like sequence from existing assets
+- branching a set without losing the original source image
+
+---
+
+## Trash View Mode
+
+Deleting an illustration in Lite removes it from the active gallery, but it does not delete the source image file from disk.
+
+Deleted lines are marked internally with `deleted=True` and can be reviewed in Trash View Mode.
+
+Trash View Mode lets you:
+- see deleted illustrations separately from the main gallery
+- restore deleted illustrations with `復帰`
+- keep the main gallery focused and uncluttered
+
+There is no permanent-delete workflow in Lite yet.
+
+---
+
+## Prompt Graph / PromptCloud
+
+PromptGraph still visualizes prompt words as graph structures.
+
+In Lite, graph and PromptCloud views are secondary, project-wide understanding tools. They help users inspect repeated words, prompt relationships, and the overall structure of an illustration collection.
+
+Advanced graph editing and large-scale structured operations remain Pro-oriented.
 
 ---
 
 # Current UI Direction
 
-PromptGraph currently uses Streamlit as a rapid development and validation frontend.
+PromptGraph Lite currently uses Streamlit as a rapid development and validation frontend.
 
-The current Lite build focuses on validating:
-- graph-based prompt workflows
-- prompt visualization
-- safe editing flows
-- reusable prompt operations
+The current Lite build focuses on practical AI illustration production workflows:
+- gallery-first review
+- image sequence cleanup
+- inline generation source editing
+- ComfyUI single-image generation
+- candidate comparison and insertion
+- safe export for public sharing
+- project save/load and autosave
 
-before moving toward heavier IDE-style frontend architecture.
-
-The long-term design separates:
+The long-term design still separates:
 - prompt operation logic
 - parser logic
 - graph logic
+- project import/export logic
 - UI/frontend layers
 
 This enables future support for:
@@ -150,29 +169,31 @@ This enables future support for:
 
 ## Available in PromptGraph Lite
 
-- Graph visualization of prompts
-- Prompt Cloud / word frequency visualization
-- Focus Edit Mode
-- Prompt line editing
-- Single-line branch creation from existing prompt lines
-- Continue Story line creation from a focused prompt line
-- Single-line reorder for story/lineage ordering
+- Gallery Edit Mode as the main workflow
+- Inline generation source prompt editing
+- Prompt-only line creation
+- Candidate image generation with ComfyUI
+- Manual external candidate image import
+- Candidate insertion into the main illustration sequence
+- Branch / continuation line creation
+- Single-line reorder and multi-select sequence insertion
+- Per-card deletion and selected-item deletion
+- Trash View Mode for restoring deleted illustrations
 - PNG metadata import for generated illustration assets
-- Single-image ComfyUI generation from Focus Edit
-- Candidate image assignment as After or Reference
-- Undo/history system
-- Merge identical words
-- Rename/Delete preview
-- JSON save/load
-- Project folder creation with initial `project.json` and `generated/`
-- Project Overview with lineage, branch, continuation, candidate, and After-image counts
-- Recent project tracking for saved JSON workspaces
-- TXT export
+- Folder import for prompt/image collections
+- Project folder creation with `project.json` and `generated/`
+- JSON project save/load
+- Recent project tracking
+- Project autosave
+- Prompt graph visualization
+- PromptCloud / word frequency visualization
+- Overall edit mode for project-wide structure inspection
+- TXT prompt export
 - Prompt/image set export with ordered prompts and available illustration images
+- Public-safe export options with PNG metadata stripping
 - Streamlit-based UI
-- Prompt structure inspection
-- Word cloud visualization
-- Safe graph-oriented editing workflow
+
+Lite focuses on practical illustration-sequence editing. It supports the full basic loop of read, edit, generate, insert, save, recover, and export.
 
 ---
 
@@ -200,20 +221,22 @@ Current and planned Pro features include:
 ## PromptGraph Lite
 
 Designed for:
-- learning
-- prompt understanding
-- graph visualization
-- safe Focus Edit workflows
-- trying the PromptGraph concept
+- AI illustration collection maintenance
+- gallery-based review
+- prompt editing beside images
+- ComfyUI single-image iteration
+- candidate insertion into an illustration sequence
+- recovering deleted project items through Trash View Mode
+- safe export and project persistence
 
-Lite intentionally limits destructive global editing features.
+Lite intentionally limits advanced global graph editing, module editing, batch generation, and experimental AI-assisted features.
 
 The goal is:
 - import existing assets
-- understand prompt lineage
-- edit one line safely
-- export/regenerate through external workflows
+- edit the illustration sequence visually
+- branch or continue selected images
 - save and resume projects
+- export usable prompt/image sets
 
 ---
 
@@ -222,11 +245,12 @@ The goal is:
 Designed for:
 - fast structured editing
 - larger prompt workflows
+- advanced graph/prompt structure editing
 - automation-oriented operations
 - reusable transformation pipelines
 - future AI-agent integration
 
-Pro focuses on scalable prompt workflow editing.
+Pro focuses on scalable prompt workflow editing beyond the practical gallery workflow in Lite.
 
 ---
 
@@ -237,7 +261,8 @@ PromptGraph is not intended to be just another prompt textbox editor.
 The long-term goal is:
 
 - Prompt IDE
-- Prompt sequence editor
+- AI illustration sequence editor
+- Branch/route workflow system
 - Scene workflow system
 - AI-friendly prompt engine
 - Future MCP / agent-compatible workflow platform
@@ -248,13 +273,13 @@ The project is designed around both:
 
 ---
 
-# 🖼️ Screenshots
+# Screenshots
 
 ## Prompt Graph
 
 ![Prompt Graph](docs/graph.png)
 
-Merge identical words to simplify graph structure and understand prompt relationships instantly.
+Graph and PromptCloud views help inspect repeated words and project-wide prompt relationships.
 
 > Graph layout and visualization will continue evolving during development.
 
@@ -269,6 +294,8 @@ Merge identical words to simplify graph structure and understand prompt relation
 ## Focus Edit Mode
 
 ![Focus Edit Mode](docs/focusedit.png)
+
+Focus Edit remains available, but the main Lite workflow is now Gallery Edit Mode.
 
 ---
 
@@ -305,16 +332,15 @@ or:
 
 Planned future directions include:
 
-- Continue validating PromptGraph workflows in Streamlit
-- Improve graph-based editing workflows
+- Improve Gallery Edit Mode for larger illustration projects
+- Continue validating candidate insertion workflows
+- Add lightweight branch/route editing concepts
+- Improve story/scene continuation workflows
+- Keep graph and PromptCloud useful as project-wide understanding tools
 - Separate core prompt operations from the UI
-- Scene structure systems
-- Sequence editing
-- Prompt modules
-- AI-assisted prompt operations
+- Prompt modules in a more mature subgraph-style direction
 - WD14Tagger integration
 - Image-to-prompt workflows
-- ComfyUI integration
 - Prompt clustering
 - Prompt relationship analysis
 - AI-agent workflow support
