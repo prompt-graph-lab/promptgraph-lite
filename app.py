@@ -82,6 +82,8 @@ if "selection_mode_delete_candidates" not in st.session_state:
     st.session_state.selection_mode_delete_candidates = {}
 if "gallery_expanded_line_id" not in st.session_state:
     st.session_state.gallery_expanded_line_id = None
+if "gallery_expanded_candidate" not in st.session_state:
+    st.session_state.gallery_expanded_candidate = None
 
 def _saved_time_label() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -924,6 +926,29 @@ def get_line_candidate_items(line, project=None) -> list[tuple[str, str]]:
             seen.add(identity)
     return items
 
+def render_gallery_expanded_candidate(line, project=None) -> None:
+    expanded_candidate = st.session_state.get("gallery_expanded_candidate")
+    if not isinstance(expanded_candidate, dict):
+        return
+    if expanded_candidate.get("line_id") != getattr(line, "id", None):
+        return
+
+    stored_path = expanded_candidate.get("path") or ""
+    resolved_path = _existing_project_image_path(stored_path, project)
+    if not resolved_path:
+        st.warning("拡大表示する候補画像が見つかりません。")
+        show_missing_image_debug(stored_path, project)
+        st.session_state.gallery_expanded_candidate = None
+        return
+
+    with st.container(border=True):
+        st.caption("候補イラスト拡大プレビュー")
+        st.image(resolved_path, width="stretch")
+        st.caption(stored_path)
+        if st.button("拡大表示を閉じる", key=f"gallery_candidate_preview_close_{line.id}"):
+            st.session_state.gallery_expanded_candidate = None
+            st.rerun()
+
 SUPPORTED_MANUAL_CANDIDATE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 def validate_manual_candidate_path(image_path: str, project=None) -> tuple[str, str]:
@@ -961,12 +986,19 @@ def render_gallery_line_editor(line, project) -> None:
     candidate_items = get_line_candidate_items(line, project)
     if candidate_items:
         st.caption("候補イラストをこのブロックに蓄積します。")
+        render_gallery_expanded_candidate(line, project)
         candidate_cols = st.columns(4)
         for index, (stored_path, resolved_path) in enumerate(candidate_items[:4]):
             with candidate_cols[index % 4]:
                 st.image(resolved_path, width=160)
                 is_output = is_line_output_path(line, stored_path, project)
                 st.caption("旧出力対象" if is_output else "候補")
+                if st.button("拡大", key=f"gallery_expand_candidate_{line.id}_{index}"):
+                    st.session_state.gallery_expanded_candidate = {
+                        "line_id": line.id,
+                        "path": stored_path,
+                    }
+                    st.rerun()
                 if st.button("この候補を直後に追加", key=f"gallery_output_{line.id}_{index}"):
                     new_line_id = insert_candidate_after_line(line.id, stored_path)
                     if new_line_id:
