@@ -78,6 +78,8 @@ if "pending_gallery_action" not in st.session_state:
     st.session_state.pending_gallery_action = None
 if "selection_mode_enabled" not in st.session_state:
     st.session_state.selection_mode_enabled = True
+if "trash_view_mode_enabled" not in st.session_state:
+    st.session_state.trash_view_mode_enabled = False
 if "selection_mode_delete_candidates" not in st.session_state:
     st.session_state.selection_mode_delete_candidates = {}
 if "gallery_move_targets" not in st.session_state:
@@ -159,6 +161,7 @@ def start_new_project():
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
     st.session_state.selection_mode_enabled = True
+    st.session_state.trash_view_mode_enabled = False
     st.session_state.disabled_modules = set()
     st.session_state.connect_mode = False
     st.session_state.connect_nodes = []
@@ -181,6 +184,7 @@ def create_new_project_workspace(parent_dir: str, project_name: str) -> tuple[bo
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
     st.session_state.selection_mode_enabled = True
+    st.session_state.trash_view_mode_enabled = False
     st.session_state.disabled_modules = set()
     st.session_state.connect_mode = False
     st.session_state.connect_nodes = []
@@ -251,6 +255,7 @@ def load_project_json_into_session(project_path: str) -> bool:
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
     st.session_state.selection_mode_enabled = True
+    st.session_state.trash_view_mode_enabled = False
     st.session_state.connect_mode = False
     st.session_state.connect_nodes = []
     sync_text_areas()
@@ -279,6 +284,7 @@ def _clear_import_selection_state() -> None:
     st.session_state.focused_line_id = None
     st.session_state.selected_node_ids = []
     st.session_state.selection_mode_enabled = True
+    st.session_state.trash_view_mode_enabled = False
     st.session_state.connect_mode = False
     st.session_state.connect_nodes = []
     st.session_state.selected_lines = {}
@@ -590,6 +596,33 @@ def delete_lines(line_ids) -> int:
 
 def delete_line(line_id: str):
     return delete_lines([line_id])
+
+def restore_line(line_id: str) -> bool:
+    target_line = next(
+        (
+            line for line in st.session_state.project.prompt_lines
+            if line.id == line_id and getattr(line, "deleted", False)
+        ),
+        None,
+    )
+    if not target_line:
+        return False
+
+    push_history()
+    target_line.deleted = False
+    for index, line in enumerate(st.session_state.project.prompt_lines):
+        line.current_index = index
+
+    prev_focus = st.session_state.get("focused_line_id")
+    st.session_state.project = build_graph(st.session_state.project)
+    restore_focus_after_graph_update(prev_focus)
+    st.session_state.selected_node_ids = [
+        nid for nid in st.session_state.selected_node_ids
+        if nid in st.session_state.project.nodes
+    ]
+    st.session_state.gallery_move_targets.pop(line_id, None)
+    autosave_current_project("削除済みイラストを復帰")
+    return True
 
 def duplicate_line(line_id: str, focus_new_branch: bool = False) -> str | None:
     push_history()
@@ -1129,6 +1162,47 @@ def render_illustration_selection_mode(project) -> None:
     st.write("---")
     if st.button("全体編集モードへ", key="gallery_exit_bottom"):
         st.session_state.selection_mode_enabled = False
+        st.rerun()
+
+def render_trash_view_mode(project) -> None:
+    deleted_lines = [line for line in project.prompt_lines if getattr(line, "deleted", False)]
+
+    st.subheader("ゴミ箱")
+    st.caption("削除済みイラストだけを確認し、必要なものをギャラリーへ復帰できます。元画像ファイルは変更されません。")
+    st.write(f"削除済み: {len(deleted_lines)}件")
+
+    if st.button("ギャラリー編集モードへ戻る", key="trash_return_to_gallery_top"):
+        st.session_state.trash_view_mode_enabled = False
+        st.session_state.selection_mode_enabled = True
+        st.rerun()
+
+    st.write("---")
+    if not deleted_lines:
+        st.info("削除済みイラストはありません。")
+        return
+
+    for row_start in range(0, len(deleted_lines), 4):
+        row_lines = deleted_lines[row_start: row_start + 4]
+        cols = st.columns(4)
+        for offset, line in enumerate(row_lines):
+            with cols[offset]:
+                with st.container(border=True):
+                    thumbnail_path = get_line_thumbnail_path(line, project)
+                    if thumbnail_path:
+                        st.image(thumbnail_path, width="stretch")
+                    else:
+                        st.info("画像なし")
+                    st.caption(f"{line.current_index + 1:04d} / {line.original_file_name}")
+                    if st.button("復帰", key=f"trash_restore_{line.id}"):
+                        if restore_line(line.id):
+                            st.session_state.trash_view_mode_enabled = False
+                            st.session_state.selection_mode_enabled = True
+                            st.rerun()
+
+    st.write("---")
+    if st.button("ギャラリー編集モードへ戻る", key="trash_return_to_gallery_bottom"):
+        st.session_state.trash_view_mode_enabled = False
+        st.session_state.selection_mode_enabled = True
         st.rerun()
 
 def count_line_candidates(line) -> int:
@@ -2229,23 +2303,44 @@ if project:
 st.title("PromptGraph Lite")
 st.caption("プロジェクト作成 -> 既存イラスト集の読み込み -> 生成ソース（プロンプト）の編集 -> 差分作成・継続 -> 保存・出力")
 
-mode_cols = st.columns([1, 3])
+mode_cols = st.columns([1, 1, 3])
 with mode_cols[0]:
-    if st.session_state.selection_mode_enabled:
+    if st.session_state.trash_view_mode_enabled:
+        if st.button("ギャラリー編集モードへ", type="primary", key="trash_mode_return_top"):
+            st.session_state.trash_view_mode_enabled = False
+            st.session_state.selection_mode_enabled = True
+            st.rerun()
+    elif st.session_state.selection_mode_enabled:
         if st.button("全体編集モードへ", key="selection_mode_exit_top"):
             st.session_state.selection_mode_enabled = False
+            st.session_state.trash_view_mode_enabled = False
             st.rerun()
     else:
         if st.button("ギャラリー編集モードへ", type="primary", key="selection_mode_enter"):
             st.session_state.selection_mode_enabled = True
+            st.session_state.trash_view_mode_enabled = False
             st.session_state.focused_line_id = None
             st.session_state.selected_node_ids = []
             st.rerun()
 with mode_cols[1]:
-    if st.session_state.selection_mode_enabled:
+    if st.button("ゴミ箱を見る", key="trash_mode_enter"):
+        st.session_state.trash_view_mode_enabled = True
+        st.session_state.selection_mode_enabled = False
+        st.session_state.focused_line_id = None
+        st.session_state.selected_node_ids = []
+        st.rerun()
+with mode_cols[2]:
+    if st.session_state.trash_view_mode_enabled:
+        deleted_count = len([line for line in project.prompt_lines if getattr(line, "deleted", False)])
+        st.caption(f"削除済みイラストを確認・復帰します。削除済み: {deleted_count}件")
+    elif st.session_state.selection_mode_enabled:
         st.caption("画像を見ながら並び替え・選択したイラストの移動や削除・生成ソース編集・候補管理を行います。")
     else:
         st.caption("グラフやPromptCloudで、イラスト集全体の生成ソース構造を確認・編集します。")
+
+if st.session_state.trash_view_mode_enabled:
+    render_trash_view_mode(project)
+    st.stop()
 
 if st.session_state.selection_mode_enabled:
     render_illustration_selection_mode(project)
