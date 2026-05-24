@@ -82,6 +82,8 @@ if "selection_mode_delete_candidates" not in st.session_state:
     st.session_state.selection_mode_delete_candidates = {}
 if "gallery_move_targets" not in st.session_state:
     st.session_state.gallery_move_targets = {}
+if "gallery_clear_move_target_widgets" not in st.session_state:
+    st.session_state.gallery_clear_move_target_widgets = False
 if "gallery_expanded_line_id" not in st.session_state:
     st.session_state.gallery_expanded_line_id = None
 if "gallery_expanded_candidate" not in st.session_state:
@@ -1055,6 +1057,12 @@ def render_illustration_selection_mode(project) -> None:
     active_lines = [line for line in project.prompt_lines if not getattr(line, "deleted", False)]
     active_ids = {line.id for line in active_lines}
     visible_line_ids = [line.id for line in active_lines]
+    if st.session_state.get("gallery_clear_move_target_widgets"):
+        st.session_state.gallery_move_targets = {}
+        for key in list(st.session_state.keys()):
+            if key.startswith("gallery_move_target_"):
+                del st.session_state[key]
+        st.session_state.gallery_clear_move_target_widgets = False
     candidates = st.session_state.get("selection_mode_delete_candidates", {})
     if not isinstance(candidates, dict):
         candidates = {}
@@ -1649,6 +1657,7 @@ def move_selected_lines_after(selected_line_ids: list[str], target_line_id: str)
         if nid in st.session_state.project.nodes
     ]
     st.session_state.gallery_move_targets = {}
+    st.session_state.gallery_clear_move_target_widgets = True
     autosave_current_project("選択したイラストをまとめて移動")
     sync_text_areas()
     return True
