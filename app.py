@@ -1032,7 +1032,13 @@ def render_illustration_selection_mode(project) -> None:
     move_target_ids = [line.id for line in active_lines if move_targets.get(line.id)]
     st.subheader("ギャラリー編集モード")
     st.caption("画像を見ながら順番調整、選択したイラストの移動・削除、生成ソース編集、単発生成を行います。")
-    st.write(f"選択: {len(move_target_ids)}件")
+    selection_cols = st.columns([2, 1])
+    with selection_cols[0]:
+        st.write(f"選択: {len(move_target_ids)}件")
+    with selection_cols[1]:
+        if st.button("全解除", key="gallery_clear_move_targets_top", disabled=not move_target_ids):
+            clear_gallery_move_selection()
+            st.rerun()
     st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
 
     if st.button("選択をまとめて削除", type="primary", disabled=not move_target_ids, key="gallery_delete_top"):
@@ -1073,7 +1079,7 @@ def render_illustration_selection_mode(project) -> None:
                     is_selected = bool(move_targets.get(line.id, False))
                     if is_selected:
                         st.info("選択中")
-                    select_label = "選択解除" if is_selected else "選択する"
+                    select_label = "選択解除" if is_selected else "選択"
                     if st.button(select_label, key=f"gallery_select_toggle_{line.id}"):
                         if is_selected:
                             st.session_state.gallery_move_targets.pop(line.id, None)
@@ -1089,14 +1095,8 @@ def render_illustration_selection_mode(project) -> None:
                         if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
                             if move_line(line.id, visible_line_ids, "down"):
                                 st.rerun()
-                    insert_cols = st.columns(2)
-                    with insert_cols[0]:
-                        if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
-                            if move_selected_lines_after(move_target_ids, line.id):
-                                st.rerun()
-                    with insert_cols[1]:
-                        if st.button("解除", key=f"gallery_clear_move_targets_{line.id}", disabled=not move_target_ids):
-                            clear_gallery_move_selection()
+                    if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
+                        if move_selected_lines_after(move_target_ids, line.id):
                             st.rerun()
                     action_cols = st.columns(2)
                     with action_cols[0]:
