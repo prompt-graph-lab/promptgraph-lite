@@ -84,6 +84,8 @@ if "gallery_move_targets" not in st.session_state:
     st.session_state.gallery_move_targets = {}
 if "gallery_clear_move_target_widgets" not in st.session_state:
     st.session_state.gallery_clear_move_target_widgets = False
+if "gallery_move_target_key_version" not in st.session_state:
+    st.session_state.gallery_move_target_key_version = 0
 if "gallery_expanded_line_id" not in st.session_state:
     st.session_state.gallery_expanded_line_id = None
 
@@ -1031,12 +1033,13 @@ def render_illustration_selection_mode(project) -> None:
             if key.startswith("gallery_move_target_"):
                 del st.session_state[key]
         st.session_state.gallery_clear_move_target_widgets = False
+    move_key_version = st.session_state.get("gallery_move_target_key_version", 0)
     move_targets = st.session_state.get("gallery_move_targets", {})
     if not isinstance(move_targets, dict):
         move_targets = {}
     move_targets = {line_id: bool(value) for line_id, value in move_targets.items() if line_id in active_ids}
     for line in active_lines:
-        widget_key = f"gallery_move_target_{line.id}"
+        widget_key = f"gallery_move_target_{move_key_version}_{line.id}"
         if widget_key in st.session_state:
             move_targets[line.id] = bool(st.session_state[widget_key])
     st.session_state.gallery_move_targets = move_targets
@@ -1085,7 +1088,7 @@ def render_illustration_selection_mode(project) -> None:
                     move_checked = st.checkbox(
                         "選択",
                         value=bool(move_targets.get(line.id, False)),
-                        key=f"gallery_move_target_{line.id}",
+                        key=f"gallery_move_target_{move_key_version}_{line.id}",
                     )
                     st.session_state.gallery_move_targets[line.id] = move_checked
                     if move_checked:
@@ -1101,7 +1104,7 @@ def render_illustration_selection_mode(project) -> None:
                                 st.rerun()
                     insert_cols = st.columns(2)
                     with insert_cols[0]:
-                        if st.button("ここに挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
+                        if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
                             if move_selected_lines_after(move_target_ids, line.id):
                                 st.rerun()
                     with insert_cols[1]:
@@ -1570,6 +1573,7 @@ def show_upgrade_dialog(message: str):
 def clear_gallery_move_selection() -> None:
     st.session_state.gallery_move_targets = {}
     st.session_state.gallery_clear_move_target_widgets = True
+    st.session_state.gallery_move_target_key_version = st.session_state.get("gallery_move_target_key_version", 0) + 1
 
 def move_selected_lines_after(selected_line_ids: list[str], target_line_id: str) -> bool:
     selected_ids = {line_id for line_id in selected_line_ids if line_id}
