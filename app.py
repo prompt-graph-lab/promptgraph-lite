@@ -823,6 +823,57 @@ def create_prompt_line_from_text(prompt_text: str) -> str | None:
     autosave_current_project("生成ソースからイラストを追加")
     return line_id
 
+def is_route_separator(line) -> bool:
+    return getattr(line, "line_type", None) == "separator"
+
+def route_separator_label(line) -> str:
+    return (
+        getattr(line, "separator_label", None)
+        or getattr(line, "current_text", None)
+        or getattr(line, "original_file_name", None)
+        or "ルート区切り"
+    )
+
+def create_route_separator(label: str) -> str | None:
+    clean_label = (label or "").strip() or "ルート区切り"
+    push_history()
+    project = st.session_state.project
+    index = len(getattr(project, "prompt_lines", []))
+    line_id = f"separator_{uuid.uuid4().hex[:8]}"
+    separator = PromptLine(
+        id=line_id,
+        original_file_name=clean_label,
+        original_index=index,
+        current_index=index,
+        original_text="",
+        current_text=clean_label,
+        tokens=[],
+        image_path=None,
+    )
+    separator.line_type = "separator"
+    separator.separator_label = clean_label
+    project.prompt_lines.append(separator)
+    for i, line in enumerate(project.prompt_lines):
+        line.current_index = i
+    st.session_state.project = build_graph(project)
+    autosave_current_project("ルート区切りを追加")
+    return line_id
+
+def update_route_separator_label(line, label: str) -> bool:
+    clean_label = (label or "").strip()
+    if not clean_label:
+        st.warning("区切り名を入力してください。")
+        return False
+    if clean_label == route_separator_label(line):
+        return True
+    push_history()
+    line.separator_label = clean_label
+    line.original_file_name = clean_label
+    line.current_text = clean_label
+    st.session_state.project = build_graph(st.session_state.project)
+    autosave_current_project("ルート区切り名を変更")
+    return True
+
 def render_raw_prompt_line_creator(project, expanded: bool = False) -> None:
     with st.expander("生成ソース（プロンプト）からイラストを追加", expanded=expanded):
         st.caption("画像なしのイラスト行を追加します。追加後にComfyUIで候補イラストを生成できます。")
@@ -834,6 +885,15 @@ def render_raw_prompt_line_creator(project, expanded: bool = False) -> None:
         if st.button("プロンプトからイラストを追加", type="primary", key="gallery_add_prompt_line"):
             if create_prompt_line_from_text(prompt_text):
                 st.success("生成ソース（プロンプト）からイラストを追加しました。")
+                st.rerun()
+
+def render_route_separator_creator(project) -> None:
+    with st.expander("ルート区切りを追加", expanded=False):
+        st.caption("ギャラリー上に軽いルート区切りを追加します。画像やプロンプトは作成しません。")
+        label = st.text_input("区切り名", value="ルート1", key="route_separator_label")
+        if st.button("区切りを追加", key="add_route_separator"):
+            if create_route_separator(label):
+                st.success("ルート区切りを追加しました。")
                 st.rerun()
 
 def process_pending_gallery_action(show_inline_progress: bool = False) -> None:
@@ -1069,6 +1129,7 @@ def render_illustration_selection_mode(project) -> None:
     st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
 
     render_raw_prompt_line_creator(project, expanded=not active_lines)
+    render_route_separator_creator(project)
 
     st.write("---")
     if not active_lines:
@@ -1090,6 +1151,60 @@ def render_illustration_selection_mode(project) -> None:
             line_index = row_start + offset
             with cols[offset]:
                 with st.container(border=True):
+                    if is_route_separator(line):
+                        label = route_separator_label(line)
+                        st.markdown(f"### ━ {label} ━")
+                        st.caption(f"{line.current_index + 1:04d} / ルート区切り")
+                        is_selected = bool(move_targets.get(line.id, False))
+                        if is_selected:
+                            st.info("選択中")
+                        select_cols = st.columns(2)
+                        with select_cols[0]:
+                            select_label = "解除" if is_selected else "選択"
+                            if st.button(select_label, key=f"gallery_select_toggle_{line.id}"):
+                                if is_selected:
+                                    st.session_state.gallery_move_targets.pop(line.id, None)
+                                else:
+                                    st.session_state.gallery_move_targets[line.id] = True
+                                st.rerun()
+                        with select_cols[1]:
+                            if st.button("全解除", key=f"gallery_clear_move_targets_{line.id}", disabled=not move_target_ids):
+                                clear_gallery_move_selection()
+                                st.rerun()
+                        move_cols = st.columns(2)
+                        with move_cols[0]:
+                            if st.button("← 前に移動", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
+                                if move_line(line.id, visible_line_ids, "up"):
+                                    st.rerun()
+                        with move_cols[1]:
+                            if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
+                                if move_line(line.id, visible_line_ids, "down"):
+                                    st.rerun()
+                        label_key = f"separator_label_edit_{line.id}"
+                        st.text_input("区切り名", value=label, key=label_key)
+                        edit_insert_cols = st.columns(2)
+                        with edit_insert_cols[0]:
+                            if st.button("編集名", key=f"separator_save_label_{line.id}"):
+                                if update_route_separator_label(line, st.session_state.get(label_key, "")):
+                                    st.rerun()
+                        with edit_insert_cols[1]:
+                            if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
+                                if move_selected_lines_after(move_target_ids, line.id):
+                                    st.rerun()
+                        delete_cols = st.columns(2)
+                        with delete_cols[0]:
+                            if st.button("一件削除", key=f"gallery_delete_line_{line.id}"):
+                                st.session_state.gallery_move_targets.pop(line.id, None)
+                                delete_line(line.id)
+                                st.rerun()
+                        with delete_cols[1]:
+                            if st.button("選択を削除", key=f"gallery_delete_selected_{line.id}", disabled=not move_target_ids):
+                                deleted_count = delete_lines(move_target_ids)
+                                clear_gallery_move_selection()
+                                if deleted_count:
+                                    st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
+                                st.rerun()
+                        continue
                     thumbnail_path = get_line_thumbnail_path(line, project)
                     if thumbnail_path:
                         st.image(thumbnail_path, width="stretch")
@@ -1187,12 +1302,16 @@ def render_trash_view_mode(project) -> None:
         for offset, line in enumerate(row_lines):
             with cols[offset]:
                 with st.container(border=True):
-                    thumbnail_path = get_line_thumbnail_path(line, project)
-                    if thumbnail_path:
-                        st.image(thumbnail_path, width="stretch")
+                    if is_route_separator(line):
+                        st.markdown(f"### ━ {route_separator_label(line)} ━")
+                        st.caption(f"{line.current_index + 1:04d} / ルート区切り")
                     else:
-                        st.info("画像なし")
-                    st.caption(f"{line.current_index + 1:04d} / {line.original_file_name}")
+                        thumbnail_path = get_line_thumbnail_path(line, project)
+                        if thumbnail_path:
+                            st.image(thumbnail_path, width="stretch")
+                        else:
+                            st.info("画像なし")
+                        st.caption(f"{line.current_index + 1:04d} / {line.original_file_name}")
                     if st.button("復帰", key=f"trash_restore_{line.id}"):
                         if restore_line(line.id):
                             st.session_state.trash_view_mode_enabled = False

@@ -17,6 +17,8 @@ class PromptLine:
     duplicated_from: Optional[str] = None
     image_path: Optional[str] = None
     generated_image_path: Optional[str] = None
+    line_type: Optional[str] = None
+    separator_label: Optional[str] = None
 
 @dataclass
 class PromptNode:
