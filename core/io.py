@@ -106,6 +106,9 @@ def _candidate_path(candidate):
         return str(candidate.get("path") or "")
     return str(candidate) if candidate else ""
 
+def _is_separator_line(line) -> bool:
+    return getattr(line, "line_type", None) == "separator"
+
 def _normalize_candidate_record(candidate):
     if isinstance(candidate, dict):
         path = _candidate_path(candidate)
@@ -805,7 +808,7 @@ def export_to_txt(project: Project, output_path: str, include_comments: bool = F
         
     from core.operations import get_active_tokens
     
-    valid_lines = [l for l in project.prompt_lines if not l.deleted]
+    valid_lines = [l for l in project.prompt_lines if not l.deleted and not _is_separator_line(l)]
     
     with open(output_path, 'w', encoding='utf-8') as f:
         current_file = ""
@@ -1012,7 +1015,7 @@ def export_prompt_image_set(
     missing_images = []
     stripped_images = 0
     metadata_images = 0
-    valid_lines = [line for line in project.prompt_lines if not line.deleted]
+    valid_lines = [line for line in project.prompt_lines if not line.deleted and not _is_separator_line(line)]
 
     with open(prompts_path, "w", encoding="utf-8") as prompt_file:
         for index, line in enumerate(valid_lines, start=1):
