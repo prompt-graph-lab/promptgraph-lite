@@ -1649,6 +1649,12 @@ def _workflow_text_from_line_metadata(project, line):
     return "", "", image_metadata
 
 def _workflow_metadata_status(project, line):
+    force_shared = bool(
+        st.session_state.get(
+            "force_shared_comfy_workflow",
+            st.session_state.settings.get("force_shared_comfy_workflow", False),
+        )
+    )
     workflow_text, workflow_label, image_metadata = _workflow_text_from_line_metadata(project, line)
     raw_metadata = (image_metadata or {}).get("raw_metadata", {})
     raw_metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
@@ -1656,7 +1662,11 @@ def _workflow_metadata_status(project, line):
     has_workflow = "workflow" in {str(key).lower() for key in raw_metadata}
     shared_path = st.session_state.get("comfy_workflow_path") or st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json")
     shared_exists = bool(shared_path and os.path.exists(shared_path))
-    if workflow_text:
+    if force_shared and shared_exists:
+        selected = "Shared workflow (forced)"
+    elif force_shared:
+        selected = "Shared workflow (forced, workflow_api.json missing)"
+    elif workflow_text:
         selected = f"埋め込みPNG workflowを使用: {workflow_label}"
     elif shared_exists:
         selected = "共有workflow_api.jsonを使用"
@@ -1665,6 +1675,7 @@ def _workflow_metadata_status(project, line):
     return {
         "embedded_found": has_prompt or has_workflow,
         "embedded_executable": bool(workflow_text),
+        "force_shared": force_shared,
         "workflow_label": workflow_label,
         "shared_path": shared_path,
         "shared_exists": shared_exists,
@@ -1905,7 +1916,16 @@ def _build_lite_workflow_from_text(workflow_text, target_line, image_metadata=No
     return workflow_json
 
 def build_lite_generation_workflow(target_line):
-    workflow_text, _workflow_label, image_metadata = _workflow_text_from_line_metadata(st.session_state.project, target_line)
+    force_shared = bool(
+        st.session_state.get(
+            "force_shared_comfy_workflow",
+            st.session_state.settings.get("force_shared_comfy_workflow", False),
+        )
+    )
+    workflow_text = ""
+    image_metadata = None
+    if not force_shared:
+        workflow_text, _workflow_label, image_metadata = _workflow_text_from_line_metadata(st.session_state.project, target_line)
     if not workflow_text:
         if not os.path.exists(st.session_state.comfy_workflow_path):
             raise FileNotFoundError(f"workflow JSONが見つかりません: {st.session_state.comfy_workflow_path}")
@@ -1919,10 +1939,11 @@ def render_lite_comfy_workflow_debug_preview(target_line):
         st.caption("workflowソース状態")
         st.markdown(f"- embedded PNG workflow found: {'yes' if status['embedded_found'] else 'no'}")
         st.markdown(f"- executable embedded workflow: {'yes' if status['embedded_executable'] else 'no'}")
+        st.markdown(f"- force shared workflow: {'yes' if status['force_shared'] else 'no'}")
         st.markdown(f"- selected source: {status['selected']}")
         st.caption("共有workflow JSONパス")
         st.code(status["shared_path"] or "(not set)", language="text")
-        if not status["embedded_executable"] and not status["shared_exists"]:
+        if (status["force_shared"] or not status["embedded_executable"]) and not status["shared_exists"]:
             st.warning(f"workflow JSONが見つかりません: {st.session_state.comfy_workflow_path}")
             return
         try:
@@ -2651,10 +2672,24 @@ st.sidebar.caption("通常は同梱または標準のworkflow_api.jsonを使え�
 def update_comfy_settings():
     st.session_state.settings["comfyui_url"] = st.session_state.comfy_url
     st.session_state.settings["comfyui_workflow_path"] = st.session_state.comfy_workflow_path
+    st.session_state.settings["force_shared_comfy_workflow"] = bool(
+        st.session_state.get(
+            "force_shared_comfy_workflow",
+            st.session_state.settings.get("force_shared_comfy_workflow", False),
+        )
+    )
     save_settings(st.session_state.settings)
 
 st.session_state.comfy_url = st.sidebar.text_input("ComfyUI URL", st.session_state.settings.get("comfyui_url", "127.0.0.1:8188"), on_change=update_comfy_settings)
 st.session_state.comfy_workflow_path = st.sidebar.text_input("workflow_api.jsonパス", st.session_state.settings.get("comfyui_workflow_path", "workflow_api.json"), on_change=update_comfy_settings)
+if "force_shared_comfy_workflow" not in st.session_state:
+    st.session_state.force_shared_comfy_workflow = bool(st.session_state.settings.get("force_shared_comfy_workflow", False))
+st.sidebar.checkbox(
+    "共通ワークフローを強制使用",
+    key="force_shared_comfy_workflow",
+    help="埋め込みワークフローを無視し、workflow_api.json を常に使用します。",
+    on_change=update_comfy_settings,
+)
 
 project = st.session_state.project
 if project:
