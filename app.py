@@ -863,6 +863,57 @@ def create_route_separator(label: str) -> str | None:
     autosave_current_project("ルート区切りを追加")
     return line_id
 
+def create_route_branch_after_line(line_id: str, first_label: str = "ルート1", second_label: str = "ルート2") -> bool:
+    project = st.session_state.project
+    target_index = next(
+        (
+            index for index, line in enumerate(project.prompt_lines)
+            if line.id == line_id and not getattr(line, "deleted", False)
+        ),
+        None,
+    )
+    if target_index is None:
+        return False
+
+    labels = [
+        (first_label or "").strip() or "ルート1",
+        (second_label or "").strip() or "ルート2",
+    ]
+    push_history()
+    separators = []
+    for offset, label in enumerate(labels):
+        separator_id = f"separator_{uuid.uuid4().hex[:8]}"
+        insert_index = target_index + 1 + offset
+        separator = PromptLine(
+            id=separator_id,
+            original_file_name=label,
+            original_index=insert_index,
+            current_index=insert_index,
+            original_text="",
+            current_text=label,
+            tokens=[],
+            image_path=None,
+        )
+        separator.line_type = "separator"
+        separator.separator_label = label
+        separators.append(separator)
+
+    project.prompt_lines[target_index + 1:target_index + 1] = separators
+    for index, line in enumerate(project.prompt_lines):
+        line.current_index = index
+
+    prev_focus = st.session_state.get("focused_line_id")
+    st.session_state.project = build_graph(project)
+    restore_focus_after_graph_update(prev_focus)
+    st.session_state.selected_node_ids = [
+        nid for nid in st.session_state.selected_node_ids
+        if nid in st.session_state.project.nodes
+    ]
+    st.session_state.gallery_route_display_mode = "全ルート表示"
+    st.session_state.gallery_selected_route_separator_id = separators[0].id
+    autosave_current_project("ルート分岐を追加")
+    return True
+
 def update_route_separator_label(line, label: str) -> bool:
     clean_label = (label or "").strip()
     if not clean_label:
@@ -1171,6 +1222,9 @@ def render_illustration_selection_mode(project) -> None:
     st.subheader("ギャラリー編集モード")
     st.caption("画像を見ながら順番調整、選択したイラストの移動・削除、生成ソース編集、単発生成を行います。")
     st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
+    if st.session_state.get("branch_feedback"):
+        st.success(st.session_state.branch_feedback)
+        st.session_state.branch_feedback = ""
 
     render_raw_prompt_line_creator(project, expanded=not active_lines)
     render_route_separator_creator(project)
@@ -1239,7 +1293,7 @@ def render_illustration_selection_mode(project) -> None:
                                     st.rerun()
                         label_key = f"separator_label_edit_{line.id}"
                         st.text_input("区切り名", value=label, key=label_key)
-                        edit_insert_cols = st.columns(2)
+                        edit_insert_cols = st.columns(3)
                         with edit_insert_cols[0]:
                             if st.button("編集名", key=f"separator_save_label_{line.id}"):
                                 if update_route_separator_label(line, st.session_state.get(label_key, "")):
@@ -1247,6 +1301,11 @@ def render_illustration_selection_mode(project) -> None:
                         with edit_insert_cols[1]:
                             if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
                                 if move_selected_lines_after(move_target_ids, line.id):
+                                    st.rerun()
+                        with edit_insert_cols[2]:
+                            if st.button("ここから分岐", key=f"gallery_create_route_branch_{line.id}"):
+                                if create_route_branch_after_line(line.id):
+                                    st.session_state.branch_feedback = "ルート分岐を追加しました。"
                                     st.rerun()
                         delete_cols = st.columns(2)
                         with delete_cols[0]:
@@ -1293,7 +1352,7 @@ def render_illustration_selection_mode(project) -> None:
                         if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
                             if move_line(line.id, active_line_ids, "down"):
                                 st.rerun()
-                    edit_insert_cols = st.columns(2)
+                    edit_insert_cols = st.columns(3)
                     with edit_insert_cols[0]:
                         if st.button("編集", key=f"gallery_edit_{line.id}"):
                             st.session_state.gallery_expanded_line_id = None if expanded_line_id == line.id else line.id
@@ -1301,6 +1360,11 @@ def render_illustration_selection_mode(project) -> None:
                     with edit_insert_cols[1]:
                         if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
                             if move_selected_lines_after(move_target_ids, line.id):
+                                st.rerun()
+                    with edit_insert_cols[2]:
+                        if st.button("ここから分岐", key=f"gallery_create_route_branch_{line.id}"):
+                            if create_route_branch_after_line(line.id):
+                                st.session_state.branch_feedback = "ルート分岐を追加しました。"
                                 st.rerun()
                     delete_cols = st.columns(2)
                     with delete_cols[0]:
