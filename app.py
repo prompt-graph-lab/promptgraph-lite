@@ -832,6 +832,15 @@ def create_prompt_line_from_text(prompt_text: str) -> str | None:
 def is_route_separator(line) -> bool:
     return getattr(line, "line_type", None) == "separator"
 
+ROUTE_COLOR_OPTIONS = {
+    "blue": ("青", "🔵"),
+    "green": ("緑", "🟢"),
+    "purple": ("紫", "🟣"),
+    "orange": ("オレンジ", "🟠"),
+    "red": ("赤", "🔴"),
+    "gray": ("グレー", "⚪"),
+}
+
 def route_separator_label(line) -> str:
     return (
         getattr(line, "separator_label", None)
@@ -840,7 +849,27 @@ def route_separator_label(line) -> str:
         or "ルート区切り"
     )
 
-def create_route_separator(label: str) -> str | None:
+def route_separator_color(line) -> str:
+    color = getattr(line, "separator_color", None)
+    return color if color in ROUTE_COLOR_OPTIONS else "gray"
+
+def route_color_badge(color: str) -> str:
+    return ROUTE_COLOR_OPTIONS.get(color, ROUTE_COLOR_OPTIONS["gray"])[1]
+
+def route_color_name(color: str) -> str:
+    name, badge = ROUTE_COLOR_OPTIONS.get(color, ROUTE_COLOR_OPTIONS["gray"])
+    return f"{badge} {name}"
+
+def current_route_color_for_line(active_lines: list, line_id: str) -> str | None:
+    current_color = None
+    for line in active_lines:
+        if is_route_separator(line):
+            current_color = route_separator_color(line)
+        if line.id == line_id:
+            return current_color
+    return None
+
+def create_route_separator(label: str, color: str = "gray") -> str | None:
     clean_label = (label or "").strip() or "ルート区切り"
     push_history()
     project = st.session_state.project
@@ -858,6 +887,7 @@ def create_route_separator(label: str) -> str | None:
     )
     separator.line_type = "separator"
     separator.separator_label = clean_label
+    separator.separator_color = color if color in ROUTE_COLOR_OPTIONS else "gray"
     project.prompt_lines.append(separator)
     for i, line in enumerate(project.prompt_lines):
         line.current_index = i
@@ -881,6 +911,7 @@ def create_route_branch_after_line(line_id: str, first_label: str = "ルート1"
         (first_label or "").strip() or "ルート1",
         (second_label or "").strip() or "ルート2",
     ]
+    colors = ["blue", "green"]
     push_history()
     separators = []
     for offset, label in enumerate(labels):
@@ -898,6 +929,7 @@ def create_route_branch_after_line(line_id: str, first_label: str = "ルート1"
         )
         separator.line_type = "separator"
         separator.separator_label = label
+        separator.separator_color = colors[offset] if offset < len(colors) else "gray"
         separators.append(separator)
 
     project.prompt_lines[target_index + 1:target_index + 1] = separators
@@ -929,6 +961,16 @@ def update_route_separator_label(line, label: str) -> bool:
     line.current_text = clean_label
     st.session_state.project = build_graph(st.session_state.project)
     autosave_current_project("ルート区切り名を変更")
+    return True
+
+def update_route_separator_color(line, color: str) -> bool:
+    clean_color = color if color in ROUTE_COLOR_OPTIONS else "gray"
+    if clean_color == route_separator_color(line):
+        return True
+    push_history()
+    line.separator_color = clean_color
+    st.session_state.project = build_graph(st.session_state.project)
+    autosave_current_project("ルート区切り色を変更")
     return True
 
 def render_raw_prompt_line_creator(project, expanded: bool = False) -> None:
@@ -1311,6 +1353,8 @@ def render_illustration_selection_mode(project) -> None:
                 with st.container(border=True):
                     if is_route_separator(line):
                         label = route_separator_label(line)
+                        color = route_separator_color(line)
+                        color_badge = route_color_badge(color)
                         collapsed_routes = st.session_state.get("gallery_collapsed_routes", {})
                         is_collapsed = bool(collapsed_routes.get(line.id))
                         display_collapsed = is_collapsed and route_mode == "全ルート表示"
@@ -1326,7 +1370,7 @@ def render_illustration_selection_mode(project) -> None:
                                 st.session_state.gallery_collapsed_routes[line.id] = not is_collapsed
                                 st.rerun()
                         with title_cols[1]:
-                            st.markdown(f"### ━ {label} ━")
+                            st.markdown(f"### {color_badge} ━ {label} ━")
                         st.caption(f"{line.current_index + 1:04d} / ルート区切り")
                         if collapsed_hidden_counts.get(line.id):
                             st.caption(f"{collapsed_hidden_counts[line.id]}件を折りたたみ中")
@@ -1357,6 +1401,17 @@ def render_illustration_selection_mode(project) -> None:
                                     st.rerun()
                         label_key = f"separator_label_edit_{line.id}"
                         st.text_input("区切り名", value=label, key=label_key)
+                        color_key = f"separator_color_edit_{line.id}"
+                        selected_color = st.selectbox(
+                            "色",
+                            options=list(ROUTE_COLOR_OPTIONS.keys()),
+                            index=list(ROUTE_COLOR_OPTIONS.keys()).index(color),
+                            format_func=route_color_name,
+                            key=color_key,
+                        )
+                        if selected_color != color:
+                            if update_route_separator_color(line, selected_color):
+                                st.rerun()
                         edit_insert_cols = st.columns(3)
                         with edit_insert_cols[0]:
                             if st.button("編集名", key=f"separator_save_label_{line.id}"):
@@ -1386,6 +1441,9 @@ def render_illustration_selection_mode(project) -> None:
                                 st.rerun()
                         continue
                     thumbnail_path = get_line_thumbnail_path(line, project)
+                    inherited_route_color = current_route_color_for_line(active_lines, line.id)
+                    if inherited_route_color:
+                        st.caption(route_color_name(inherited_route_color))
                     if thumbnail_path:
                         st.image(thumbnail_path, width="stretch")
                     else:
@@ -1488,7 +1546,8 @@ def render_trash_view_mode(project) -> None:
             with cols[offset]:
                 with st.container(border=True):
                     if is_route_separator(line):
-                        st.markdown(f"### ━ {route_separator_label(line)} ━")
+                        color_badge = route_color_badge(route_separator_color(line))
+                        st.markdown(f"### {color_badge} ━ {route_separator_label(line)} ━")
                         st.caption(f"{line.current_index + 1:04d} / ルート区切り")
                     else:
                         thumbnail_path = get_line_thumbnail_path(line, project)

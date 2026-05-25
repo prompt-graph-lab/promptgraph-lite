@@ -19,6 +19,7 @@ class PromptLine:
     generated_image_path: Optional[str] = None
     line_type: Optional[str] = None
     separator_label: Optional[str] = None
+    separator_color: Optional[str] = None
 
 @dataclass
 class PromptNode:
