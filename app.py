@@ -84,6 +84,8 @@ if "selection_mode_delete_candidates" not in st.session_state:
     st.session_state.selection_mode_delete_candidates = {}
 if "gallery_move_targets" not in st.session_state:
     st.session_state.gallery_move_targets = {}
+if "gallery_collapsed_routes" not in st.session_state:
+    st.session_state.gallery_collapsed_routes = {}
 if "gallery_route_display_mode" not in st.session_state:
     st.session_state.gallery_route_display_mode = "全ルート表示"
 if "gallery_selected_route_separator_id" not in st.session_state:
@@ -951,6 +953,47 @@ def render_route_separator_creator(project) -> None:
                 st.success("ルート区切りを追加しました。")
                 st.rerun()
 
+def route_collapsed_display_lines(active_lines: list) -> tuple[list, dict]:
+    collapsed_routes = st.session_state.get("gallery_collapsed_routes", {})
+    if not isinstance(collapsed_routes, dict):
+        collapsed_routes = {}
+        st.session_state.gallery_collapsed_routes = collapsed_routes
+
+    display_lines = []
+    hidden_counts = {}
+    collapsed_separator_id = None
+    hidden_count = 0
+
+    for line in active_lines:
+        if is_route_separator(line):
+            if collapsed_separator_id and hidden_count:
+                hidden_counts[collapsed_separator_id] = hidden_count
+            display_lines.append(line)
+            if collapsed_routes.get(line.id):
+                collapsed_separator_id = line.id
+                hidden_count = 0
+            else:
+                collapsed_separator_id = None
+                hidden_count = 0
+            continue
+
+        if collapsed_separator_id:
+            hidden_count += 1
+            continue
+
+        display_lines.append(line)
+
+    if collapsed_separator_id and hidden_count:
+        hidden_counts[collapsed_separator_id] = hidden_count
+
+    active_ids = {line.id for line in active_lines if is_route_separator(line)}
+    st.session_state.gallery_collapsed_routes = {
+        line_id: bool(collapsed)
+        for line_id, collapsed in collapsed_routes.items()
+        if line_id in active_ids
+    }
+    return display_lines, hidden_counts
+
 def route_switch_display_lines(active_lines: list) -> list:
     separators = [line for line in active_lines if is_route_separator(line)]
     if not separators:
@@ -1244,7 +1287,11 @@ def render_illustration_selection_mode(project) -> None:
         horizontal=True,
         key="gallery_route_display_mode",
     )
-    display_lines = active_lines if route_mode == "全ルート表示" else route_switch_display_lines(active_lines)
+    if route_mode == "全ルート表示":
+        display_lines, collapsed_hidden_counts = route_collapsed_display_lines(active_lines)
+    else:
+        display_lines = route_switch_display_lines(active_lines)
+        collapsed_hidden_counts = {}
     display_ids = {line.id for line in display_lines}
     move_target_ids = [line.id for line in display_lines if move_targets.get(line.id)]
     st.write(f"選択: {len(move_target_ids)}件")
@@ -1264,8 +1311,25 @@ def render_illustration_selection_mode(project) -> None:
                 with st.container(border=True):
                     if is_route_separator(line):
                         label = route_separator_label(line)
-                        st.markdown(f"### ━ {label} ━")
+                        collapsed_routes = st.session_state.get("gallery_collapsed_routes", {})
+                        is_collapsed = bool(collapsed_routes.get(line.id))
+                        display_collapsed = is_collapsed and route_mode == "全ルート表示"
+                        title_cols = st.columns([1, 5])
+                        with title_cols[0]:
+                            collapse_label = "▶" if display_collapsed else "▼"
+                            if st.button(
+                                collapse_label,
+                                key=f"gallery_toggle_route_collapse_{line.id}",
+                                help="ルートを展開 / 折りたたみ",
+                                disabled=route_mode != "全ルート表示",
+                            ):
+                                st.session_state.gallery_collapsed_routes[line.id] = not is_collapsed
+                                st.rerun()
+                        with title_cols[1]:
+                            st.markdown(f"### ━ {label} ━")
                         st.caption(f"{line.current_index + 1:04d} / ルート区切り")
+                        if collapsed_hidden_counts.get(line.id):
+                            st.caption(f"{collapsed_hidden_counts[line.id]}件を折りたたみ中")
                         is_selected = bool(move_targets.get(line.id, False))
                         if is_selected:
                             st.info("選択中")
