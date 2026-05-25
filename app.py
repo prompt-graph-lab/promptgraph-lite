@@ -1182,15 +1182,27 @@ def render_illustration_selection_mode(project) -> None:
                                     st.rerun()
                         label_key = f"separator_label_edit_{line.id}"
                         st.text_input("区切り名", value=label, key=label_key)
-                        action_cols = st.columns(2)
-                        with action_cols[0]:
+                        edit_insert_cols = st.columns(2)
+                        with edit_insert_cols[0]:
                             if st.button("編集名", key=f"separator_save_label_{line.id}"):
                                 if update_route_separator_label(line, st.session_state.get(label_key, "")):
                                     st.rerun()
-                        with action_cols[1]:
+                        with edit_insert_cols[1]:
+                            if st.button("挿入", key=f"gallery_insert_after_{line.id}", disabled=not move_target_ids):
+                                if move_selected_lines_after(move_target_ids, line.id):
+                                    st.rerun()
+                        delete_cols = st.columns(2)
+                        with delete_cols[0]:
                             if st.button("一件削除", key=f"gallery_delete_line_{line.id}"):
                                 st.session_state.gallery_move_targets.pop(line.id, None)
                                 delete_line(line.id)
+                                st.rerun()
+                        with delete_cols[1]:
+                            if st.button("選択を削除", key=f"gallery_delete_selected_{line.id}", disabled=not move_target_ids):
+                                deleted_count = delete_lines(move_target_ids)
+                                clear_gallery_move_selection()
+                                if deleted_count:
+                                    st.session_state.branch_feedback = f"{deleted_count}件のイラストを削除しました。"
                                 st.rerun()
                         continue
                     thumbnail_path = get_line_thumbnail_path(line, project)
