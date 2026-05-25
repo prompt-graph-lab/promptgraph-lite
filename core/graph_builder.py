@@ -5,7 +5,17 @@ import hashlib
 import streamlit as st
 
 def _hash_project(p):
-    return str([(l.id, l.current_text, l.deleted) for l in p.prompt_lines]) + str(getattr(p, 'merge_by_word_only', False)) + "_v6"
+    return str([
+        (
+            l.id,
+            l.current_text,
+            l.deleted,
+            getattr(l, "line_type", None),
+            getattr(l, "separator_label", None),
+            getattr(l, "separator_color", None),
+        )
+        for l in p.prompt_lines
+    ]) + str(getattr(p, 'merge_by_word_only', False)) + "_v6"
 
 def make_node_id(depth: int, phrase: list[str], weight: float, group: str) -> str:
     key = f"{depth}|{' '.join(sorted(phrase))}|{group}"
