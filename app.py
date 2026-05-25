@@ -84,6 +84,10 @@ if "selection_mode_delete_candidates" not in st.session_state:
     st.session_state.selection_mode_delete_candidates = {}
 if "gallery_move_targets" not in st.session_state:
     st.session_state.gallery_move_targets = {}
+if "gallery_route_display_mode" not in st.session_state:
+    st.session_state.gallery_route_display_mode = "全ルート表示"
+if "gallery_selected_route_separator_id" not in st.session_state:
+    st.session_state.gallery_selected_route_separator_id = ""
 if "gallery_expanded_line_id" not in st.session_state:
     st.session_state.gallery_expanded_line_id = None
 
@@ -896,6 +900,48 @@ def render_route_separator_creator(project) -> None:
                 st.success("ルート区切りを追加しました。")
                 st.rerun()
 
+def route_switch_display_lines(active_lines: list) -> list:
+    separators = [line for line in active_lines if is_route_separator(line)]
+    if not separators:
+        st.caption("ルート区切りがありません。全ルート表示と同じ表示になります。")
+        st.session_state.gallery_selected_route_separator_id = ""
+        return active_lines
+
+    separator_ids = [line.id for line in separators]
+    selected_id = st.session_state.get("gallery_selected_route_separator_id") or separator_ids[0]
+    if selected_id not in separator_ids:
+        selected_id = separator_ids[0]
+        st.session_state.gallery_selected_route_separator_id = selected_id
+
+    separator_by_id = {line.id: line for line in separators}
+    selected_id = st.selectbox(
+        "表示ルート",
+        options=separator_ids,
+        index=separator_ids.index(selected_id),
+        format_func=lambda line_id: route_separator_label(separator_by_id[line_id]),
+        key="gallery_selected_route_separator_id",
+    )
+
+    first_separator_index = next(
+        (index for index, line in enumerate(active_lines) if is_route_separator(line)),
+        None,
+    )
+    selected_index = next(
+        (index for index, line in enumerate(active_lines) if line.id == selected_id),
+        None,
+    )
+    if first_separator_index is None or selected_index is None:
+        return active_lines
+
+    next_separator_index = next(
+        (
+            index for index, line in enumerate(active_lines[selected_index + 1:], start=selected_index + 1)
+            if is_route_separator(line)
+        ),
+        len(active_lines),
+    )
+    return active_lines[:first_separator_index] + active_lines[selected_index:next_separator_index]
+
 def process_pending_gallery_action(show_inline_progress: bool = False) -> None:
     pending = st.session_state.get("pending_gallery_action")
     if not isinstance(pending, dict):
@@ -1115,17 +1161,15 @@ def render_gallery_line_editor(line, project) -> None:
 def render_illustration_selection_mode(project) -> None:
     active_lines = [line for line in project.prompt_lines if not getattr(line, "deleted", False)]
     active_ids = {line.id for line in active_lines}
-    visible_line_ids = [line.id for line in active_lines]
+    active_line_ids = [line.id for line in active_lines]
     move_targets = st.session_state.get("gallery_move_targets", {})
     if not isinstance(move_targets, dict):
         move_targets = {}
     move_targets = {line_id: bool(value) for line_id, value in move_targets.items() if line_id in active_ids}
     st.session_state.gallery_move_targets = move_targets
 
-    move_target_ids = [line.id for line in active_lines if move_targets.get(line.id)]
     st.subheader("ギャラリー編集モード")
     st.caption("画像を見ながら順番調整、選択したイラストの移動・削除、生成ソース編集、単発生成を行います。")
-    st.write(f"選択: {len(move_target_ids)}件")
     st.caption("元画像ファイルは削除されません。プロジェクト上の一覧から除外します。")
 
     render_raw_prompt_line_creator(project, expanded=not active_lines)
@@ -1140,15 +1184,28 @@ def render_illustration_selection_mode(project) -> None:
         )
         return
 
+    route_mode = st.radio(
+        "ルート表示",
+        ["全ルート表示", "ルート切替表示"],
+        horizontal=True,
+        key="gallery_route_display_mode",
+    )
+    display_lines = active_lines if route_mode == "全ルート表示" else route_switch_display_lines(active_lines)
+    display_ids = {line.id for line in display_lines}
+    move_target_ids = [line.id for line in display_lines if move_targets.get(line.id)]
+    st.write(f"選択: {len(move_target_ids)}件")
+    if st.session_state.get("gallery_expanded_line_id") not in display_ids:
+        st.session_state.gallery_expanded_line_id = None
+
     pending_gallery_action = st.session_state.get("pending_gallery_action")
-    if isinstance(pending_gallery_action, dict) and pending_gallery_action.get("line_id") in active_ids:
+    if isinstance(pending_gallery_action, dict) and pending_gallery_action.get("line_id") in display_ids:
         st.session_state.gallery_expanded_line_id = pending_gallery_action.get("line_id")
     expanded_line_id = st.session_state.get("gallery_expanded_line_id")
-    for row_start in range(0, len(active_lines), 4):
-        row_lines = active_lines[row_start: row_start + 4]
+    for row_start in range(0, len(display_lines), 4):
+        row_lines = display_lines[row_start: row_start + 4]
         cols = st.columns(4)
         for offset, line in enumerate(row_lines):
-            line_index = row_start + offset
+            line_index = active_line_ids.index(line.id)
             with cols[offset]:
                 with st.container(border=True):
                     if is_route_separator(line):
@@ -1174,11 +1231,11 @@ def render_illustration_selection_mode(project) -> None:
                         move_cols = st.columns(2)
                         with move_cols[0]:
                             if st.button("← 前に移動", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
-                                if move_line(line.id, visible_line_ids, "up"):
+                                if move_line(line.id, active_line_ids, "up"):
                                     st.rerun()
                         with move_cols[1]:
                             if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
-                                if move_line(line.id, visible_line_ids, "down"):
+                                if move_line(line.id, active_line_ids, "down"):
                                     st.rerun()
                         label_key = f"separator_label_edit_{line.id}"
                         st.text_input("区切り名", value=label, key=label_key)
@@ -1230,11 +1287,11 @@ def render_illustration_selection_mode(project) -> None:
                     move_cols = st.columns(2)
                     with move_cols[0]:
                         if st.button("← 前に移動", key=f"gallery_move_up_{line.id}", disabled=line_index == 0, help="前へ"):
-                            if move_line(line.id, visible_line_ids, "up"):
+                            if move_line(line.id, active_line_ids, "up"):
                                 st.rerun()
                     with move_cols[1]:
                         if st.button("後に移動 →", key=f"gallery_move_down_{line.id}", disabled=line_index == len(active_lines) - 1, help="次へ"):
-                            if move_line(line.id, visible_line_ids, "down"):
+                            if move_line(line.id, active_line_ids, "down"):
                                 st.rerun()
                     edit_insert_cols = st.columns(2)
                     with edit_insert_cols[0]:
