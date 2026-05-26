@@ -14,6 +14,7 @@ def _default_settings():
         "comfyui_url": "127.0.0.1:8188",
         "comfyui_workflow_path": "workflow_api.json",
         "force_shared_comfy_workflow": False,
+        "help_seen": False,
         "last_project": "",
         "recent_projects": [],
     }

@@ -10,6 +10,8 @@ import os
 import uuid
 import copy
 import json
+import time
+from collections import deque
 from datetime import datetime
 from core.comfyui import generate_image_with_progress
 from core.settings import load_settings, save_settings, get_last_project_path, get_recent_projects, remember_project, EDITION
@@ -63,7 +65,7 @@ if "connect_nodes" not in st.session_state:
 if "edition" not in st.session_state:
     st.session_state.edition = EDITION
 if "show_tutorial" not in st.session_state:
-    st.session_state.show_tutorial = True
+    st.session_state.show_tutorial = not bool(st.session_state.settings.get("help_seen", False))
 if "shortcut_feedback" not in st.session_state:
     st.session_state.shortcut_feedback = ""
 if "branch_feedback" not in st.session_state:
@@ -92,6 +94,10 @@ if "gallery_selected_route_separator_id" not in st.session_state:
     st.session_state.gallery_selected_route_separator_id = ""
 if "gallery_expanded_line_id" not in st.session_state:
     st.session_state.gallery_expanded_line_id = None
+if "gallery_generation_durations" not in st.session_state:
+    st.session_state.gallery_generation_durations = deque(maxlen=10)
+elif not isinstance(st.session_state.gallery_generation_durations, deque):
+    st.session_state.gallery_generation_durations = deque(st.session_state.gallery_generation_durations, maxlen=10)
 
 def _saved_time_label() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1323,6 +1329,28 @@ def _gallery_global_generation_targets(scope: str, project, active_lines, visibl
         if not getattr(line, "deleted", False) and not is_route_separator(line)
     ]
 
+def _format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "不明"
+    seconds = int(round(seconds))
+    minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"約{hours}時間{minutes}分"
+    if minutes:
+        return f"約{minutes}分{secs:02d}秒"
+    return f"約{secs}秒"
+
+def _gallery_generation_average_seconds() -> float | None:
+    durations = [
+        float(value)
+        for value in st.session_state.get("gallery_generation_durations", [])
+        if isinstance(value, (int, float)) and value > 0
+    ]
+    if not durations:
+        return None
+    return sum(durations) / len(durations)
+
 def render_gallery_global_generation_controls(project, active_lines, visible_lines, selected_line_ids) -> None:
     with st.container(border=True):
         st.markdown("#### Gallery全生成")
@@ -1348,6 +1376,11 @@ def render_gallery_global_generation_controls(project, active_lines, visible_lin
         )
         targets = _gallery_global_generation_targets(scope, project, active_lines, visible_lines, selected_line_ids)
         st.caption(f"対象Line: {len(targets)}件 / 各Line {int(run_count)}回")
+        average_seconds = _gallery_generation_average_seconds()
+        if average_seconds:
+            st.caption(f"平均生成時間: {_format_duration(average_seconds)} / 1回")
+        else:
+            st.caption("平均生成時間: まだ推定できません")
 
         if not st.button("Gallery全生成", key="gallery_global_generate", disabled=not targets, type="primary"):
             return
@@ -1360,14 +1393,21 @@ def render_gallery_global_generation_controls(project, active_lines, visible_lin
         failure_records = []
         progress_bar = st.progress(0.0)
         status_text = st.empty()
+        eta_text = st.empty()
         push_history()
 
         for line_index, line in enumerate(targets, start=1):
             for run_index in range(1, int(run_count) + 1):
+                run_started_at = time.monotonic()
                 status_text.markdown(
                     f"**Line {line_index} / {len(targets)} — Run {run_index} / {int(run_count)}**  "
                     f"`{getattr(line, 'original_file_name', '')}`"
                 )
+                average_seconds = _gallery_generation_average_seconds()
+                if average_seconds:
+                    eta_text.caption(f"推定残り時間: {_format_duration(average_seconds * (total_steps - completed_steps))}")
+                else:
+                    eta_text.caption("推定残り時間: 計算中")
                 run_paths = []
                 try:
                     workflow_json = build_lite_generation_workflow(line)
@@ -1380,6 +1420,10 @@ def render_gallery_global_generation_controls(project, active_lines, visible_lin
                         if "value" in status:
                             step_progress = (completed_steps + float(status["value"])) / total_steps
                             progress_bar.progress(min(max(step_progress, 0.0), 1.0))
+                            average_seconds = _gallery_generation_average_seconds()
+                            if average_seconds:
+                                remaining_steps = max(total_steps - completed_steps - float(status["value"]), 0)
+                                eta_text.caption(f"推定残り時間: {_format_duration(average_seconds * remaining_steps)}")
                         if "text" in status:
                             status_text.markdown(
                                 f"**Line {line_index} / {len(targets)} — Run {run_index} / {int(run_count)}**  "
@@ -1407,8 +1451,16 @@ def render_gallery_global_generation_controls(project, active_lines, visible_lin
                         "error": str(exc),
                     })
                 finally:
+                    duration = time.monotonic() - run_started_at
+                    if duration > 0:
+                        st.session_state.gallery_generation_durations.append(duration)
                     completed_steps += 1
                     progress_bar.progress(min(completed_steps / total_steps, 1.0))
+                    average_seconds = _gallery_generation_average_seconds()
+                    if average_seconds and completed_steps < total_steps:
+                        eta_text.caption(f"推定残り時間: {_format_duration(average_seconds * (total_steps - completed_steps))}")
+                    elif completed_steps >= total_steps:
+                        eta_text.caption("推定残り時間: 約0秒")
 
         autosave_current_project("Gallery全生成")
         if success_count:
@@ -1549,7 +1601,7 @@ def render_illustration_selection_mode(project) -> None:
                                 if move_selected_lines_after(move_target_ids, line.id):
                                     st.rerun()
                         with edit_insert_cols[2]:
-                            if st.button("ここから分岐", key=f"gallery_create_route_branch_{line.id}"):
+                            if st.button("分岐", key=f"gallery_create_route_branch_{line.id}"):
                                 if create_route_branch_after_line(line.id):
                                     st.session_state.branch_feedback = "ルート分岐を追加しました。"
                                     st.rerun()
@@ -1611,7 +1663,7 @@ def render_illustration_selection_mode(project) -> None:
                             if move_selected_lines_after(move_target_ids, line.id):
                                 st.rerun()
                     with edit_insert_cols[2]:
-                        if st.button("ここから分岐", key=f"gallery_create_route_branch_{line.id}"):
+                        if st.button("分岐", key=f"gallery_create_route_branch_{line.id}"):
                             if create_route_branch_after_line(line.id):
                                 st.session_state.branch_feedback = "ルート分岐を追加しました。"
                                 st.rerun()
@@ -2339,41 +2391,62 @@ if st.session_state.show_tutorial:
     st.title("PromptGraph Liteへようこそ")
 
     st.markdown("""
-    PromptGraph Liteは、AIイラスト集を読み込み、生成ソースを確認しながら差分や続きのイラストを作るためのプロジェクトです。
+    PromptGraph Liteは、AIイラスト集をギャラリーで見ながら、生成ソース（プロンプト）を編集し、候補イラストを作って本編列へ追加していくためのツールです。
 
     ---
 
     ## 基本の流れ
 
-    **新規プロジェクトを作成するか、保存済みプロジェクトを開きます。**
-    長く育てるイラスト集はJSONプロジェクトとして保存できます。
+    1. **プロジェクトを作る / 開く**
+       長く育てるイラスト集は `project.json` として保存し、あとから再開できます。
 
-    **既存イラスト集を読み込みます。**
-    既存のプロンプトTXTと対応する画像をフォルダから読み込めます。
+    2. **イラスト集を読み込む**
+       フォルダ内の生成ソースTXT、またはメタ情報付きPNGからイラストと生成ソースを復元できます。
+       画像がまだない場合は、生成ソース（プロンプト）だけのLineを作って後から生成できます。
 
-    **イラストを1つ選び、生成ソース（プロンプト）を編集します。**
-    イラスト一覧から対象を選び、差分イラストや、このルートの次のイラストを作成します。
+    3. **Gallery編集モードで確認する**
+       画像を見ながら並び替え、選択移動、削除、Trashからの復帰ができます。削除しても元画像ファイルは消えません。
 
-    **候補イラストを生成・比較し、必要な候補を本編イラスト列へ追加します。**
-    本編列に入れたイラストと生成ソースをTXTや画像セットとして出力できます。
+    4. **生成ソース（プロンプト）を直接編集する**
+       各カードの編集パネルでプロンプトを調整し、ComfyUIで単発生成やN-run生成を行います。
+
+    5. **候補イラストを本編列へ追加する**
+       生成結果はまず候補として保存されます。良い候補だけを「この候補を直後に追加」で本編イラスト列へ入れます。
+
+    6. **ルートを整理する**
+       ルート区切り、ルート切替表示、折りたたみ、色分け、分岐を使って差分ルートを整理できます。
+
+    7. **Gallery全生成を使う**
+       Current Route / Entire Project / Selected Lines を対象に、各Line複数回の候補生成ができます。生成後は候補を確認して手動で挿入します。
+
+    8. **出力する**
+       生成ソースTXTや、公開用にPNGメタデータを削除したイラスト・生成ソースセットを書き出せます。
 
     ---
 
-    ## Lite版の制限
+    ## ComfyUI連携
 
-    - 編集は選択中の1イラストを中心に行います。
-    - 一括生成、広範囲の一括編集、Module作成はPro版機能です。
-    - グラフとPrompt Cloudは、生成ソースの構造を理解するためのプレビューです。
+    - `workflow_api.json` はComfyUIの **API Format** で保存したものを使います。
+    - PNGに埋め込まれたworkflowがある場合は利用できます。
+    - 「共通ワークフローを強制使用」をオンにすると、埋め込みworkflowを無視して共有workflowだけを使います。
 
     ---
 
-    まずはサイドバーの **新規プロジェクトを作る**、**前回のプロジェクトを開く**、または **フォルダから読み込む** から始めてください。
+    ## 全体編集モード
 
-    この案内は **ヘルプ -> 使い方を表示** から再表示できます。
+    グラフとPromptCloudは、イラスト集全体の生成ソース構造を確認するための補助ビューです。
+    LiteではGallery編集が主導線で、Proではより高度なグラフ編集やModule編集を扱います。
+
+    ---
+
+    まずはサイドバーの **新規プロジェクトを作る**、**前回のプロジェクトを開く**、または **PNGメタデータから読み込み** から始めてください。
+    この案内は **ヘルプ -> 使い方を表示** からいつでも再表示できます。
     """)
 
     if st.button("PromptGraph Liteを始める"):
         st.session_state.show_tutorial = False
+        st.session_state.settings["help_seen"] = True
+        save_settings(st.session_state.settings)
         st.rerun()
 
     st.stop()
