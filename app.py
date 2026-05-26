@@ -1314,11 +1314,7 @@ def _gallery_global_generation_targets(scope: str, project, active_lines, visibl
         separators = [line for line in active_lines if is_route_separator(line)]
         selected_id = st.session_state.get("gallery_selected_route_separator_id")
         route_lines = route_lines_for_separator(active_lines, selected_id) if separators else list(active_lines)
-        route_ids = {line.id for line in route_lines}
-        visible_ids = {line.id for line in visible_lines}
-        candidates = [line for line in active_lines if line.id in route_ids and line.id in visible_ids]
-        if not candidates:
-            candidates = route_lines
+        candidates = route_lines
     else:
         candidates = list(active_lines)
 
