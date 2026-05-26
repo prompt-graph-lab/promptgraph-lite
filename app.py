@@ -2396,6 +2396,15 @@ if st.session_state.show_tutorial:
     ---
 
     ## 基本の流れ
+    """)
+
+    workflow_diagram_path = os.path.join("docs", "lite_gallery_workflow.svg")
+    if os.path.exists(workflow_diagram_path):
+        st.image(workflow_diagram_path, width="stretch")
+    else:
+        st.caption("ワークフロー図を読み込めませんでした。Help本文はそのまま利用できます。")
+
+    st.markdown("""
 
     1. **プロジェクトを作る / 開く**
        長く育てるイラスト集は `project.json` として保存し、あとから再開できます。

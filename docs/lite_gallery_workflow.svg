@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="360" viewBox="0 0 1120 360" role="img" aria-labelledby="title desc">
+  <title id="title">PromptGraph Lite Gallery Workflow</title>
+  <desc id="desc">PromptGraph Lite workflow from project creation through import, gallery editing, candidate generation, routes, trash restore, and export.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L8,3 z" fill="#55708f"/>
+    </marker>
+    <style>
+      .bg { fill: #f7fafc; }
+      .box { fill: #ffffff; stroke: #9bb4ce; stroke-width: 2; }
+      .box2 { fill: #f0f7ff; stroke: #7aa5d6; stroke-width: 2; }
+      .box3 { fill: #f5fff5; stroke: #80b887; stroke-width: 2; }
+      .text { font-family: "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif; fill: #213143; font-size: 19px; font-weight: 700; }
+      .sub { font-family: "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif; fill: #53657a; font-size: 13px; }
+      .arrow { stroke: #55708f; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .label { font-family: "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif; fill: #46617d; font-size: 14px; font-weight: 700; }
+    </style>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1120" height="360" rx="22"/>
+  <text class="label" x="40" y="36">PromptGraph Lite の基本ワークフロー</text>
+
+  <rect class="box" x="40" y="70" width="200" height="82" rx="16"/>
+  <text class="text" x="140" y="105" text-anchor="middle">プロジェクト</text>
+  <text class="sub" x="140" y="130" text-anchor="middle">作成 / 読込 / 保存</text>
+
+  <rect class="box" x="300" y="70" width="220" height="82" rx="16"/>
+  <text class="text" x="410" y="102" text-anchor="middle">読込</text>
+  <text class="sub" x="410" y="126" text-anchor="middle">PNGメタ情報 / Prompt</text>
+
+  <rect class="box2" x="580" y="70" width="220" height="82" rx="16"/>
+  <text class="text" x="690" y="102" text-anchor="middle">Gallery編集</text>
+  <text class="sub" x="690" y="126" text-anchor="middle">並び替え / 直接編集</text>
+
+  <rect class="box2" x="860" y="70" width="220" height="82" rx="16"/>
+  <text class="text" x="970" y="102" text-anchor="middle">候補生成</text>
+  <text class="sub" x="970" y="126" text-anchor="middle">単発 / N-run / 全生成</text>
+
+  <rect class="box3" x="300" y="225" width="220" height="82" rx="16"/>
+  <text class="text" x="410" y="258" text-anchor="middle">候補を追加</text>
+  <text class="sub" x="410" y="282" text-anchor="middle">良い候補を直後に追加</text>
+
+  <rect class="box3" x="580" y="225" width="220" height="82" rx="16"/>
+  <text class="text" x="690" y="258" text-anchor="middle">Route / 分岐</text>
+  <text class="sub" x="690" y="282" text-anchor="middle">区切り / 切替 / 折りたたみ</text>
+
+  <rect class="box" x="860" y="225" width="220" height="82" rx="16"/>
+  <text class="text" x="970" y="258" text-anchor="middle">Trash / Export</text>
+  <text class="sub" x="970" y="282" text-anchor="middle">復帰 / 公開用出力</text>
+
+  <path class="arrow" d="M240 111 H292"/>
+  <path class="arrow" d="M520 111 H572"/>
+  <path class="arrow" d="M800 111 H852"/>
+  <path class="arrow" d="M970 152 V205"/>
+  <path class="arrow" d="M860 266 H808"/>
+  <path class="arrow" d="M580 266 H528"/>
+  <path class="arrow" d="M410 225 C410 185 690 190 690 158"/>
+
+  <text class="sub" x="690" y="188" text-anchor="middle">候補を見比べて、本編列へ戻す</text>
+</svg>
