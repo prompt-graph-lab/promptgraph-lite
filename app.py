@@ -1058,6 +1058,18 @@ def route_switch_display_lines(active_lines: list) -> list:
         key="gallery_selected_route_separator_id",
     )
 
+    return route_lines_for_separator(active_lines, selected_id)
+
+def route_lines_for_separator(active_lines: list, selected_id: str) -> list:
+    separators = [line for line in active_lines if is_route_separator(line)]
+    if not separators:
+        return active_lines
+
+    separator_ids = [line.id for line in separators]
+    if selected_id not in separator_ids:
+        selected_id = separator_ids[0]
+        st.session_state.gallery_selected_route_separator_id = selected_id
+
     first_separator_index = next(
         (index for index, line in enumerate(active_lines) if is_route_separator(line)),
         None,
@@ -1294,6 +1306,124 @@ def render_gallery_line_editor(line, project) -> None:
                     st.success("候補イラストを追加し、本編列の直後に追加しました。")
                 st.rerun()
 
+def _gallery_global_generation_targets(scope: str, project, active_lines, visible_lines, selected_line_ids):
+    if scope == "Selected Lines":
+        selected_ids = set(selected_line_ids)
+        candidates = [line for line in active_lines if line.id in selected_ids]
+    elif scope == "Current Route":
+        separators = [line for line in active_lines if is_route_separator(line)]
+        selected_id = st.session_state.get("gallery_selected_route_separator_id")
+        route_lines = route_lines_for_separator(active_lines, selected_id) if separators else list(active_lines)
+        route_ids = {line.id for line in route_lines}
+        visible_ids = {line.id for line in visible_lines}
+        candidates = [line for line in active_lines if line.id in route_ids and line.id in visible_ids]
+        if not candidates:
+            candidates = route_lines
+    else:
+        candidates = list(active_lines)
+
+    return [
+        line for line in candidates
+        if not getattr(line, "deleted", False) and not is_route_separator(line)
+    ]
+
+def render_gallery_global_generation_controls(project, active_lines, visible_lines, selected_line_ids) -> None:
+    with st.container(border=True):
+        st.markdown("#### Gallery全生成")
+        st.caption("複数Lineに対して候補イラストだけを生成します。本編列への挿入や元画像の置換は行いません。")
+
+        scope_options = ["Current Route", "Entire Project"]
+        if selected_line_ids:
+            scope_options.append("Selected Lines")
+
+        scope = st.radio(
+            "Generate Scope",
+            scope_options,
+            horizontal=True,
+            key="gallery_global_generation_scope",
+        )
+        run_count = st.number_input(
+            "各Line生成回数",
+            min_value=1,
+            max_value=20,
+            value=1,
+            step=1,
+            key="gallery_global_generation_count",
+        )
+        targets = _gallery_global_generation_targets(scope, project, active_lines, visible_lines, selected_line_ids)
+        st.caption(f"対象Line: {len(targets)}件 / 各Line {int(run_count)}回")
+
+        if not st.button("Gallery全生成", key="gallery_global_generate", disabled=not targets, type="primary"):
+            return
+
+        output_dir = get_generated_output_dir(project)
+        os.makedirs(output_dir, exist_ok=True)
+        total_steps = max(1, len(targets) * int(run_count))
+        completed_steps = 0
+        success_count = 0
+        failure_records = []
+        progress_bar = st.progress(0.0)
+        status_text = st.empty()
+        push_history()
+
+        for line_index, line in enumerate(targets, start=1):
+            for run_index in range(1, int(run_count) + 1):
+                status_text.markdown(
+                    f"**Line {line_index} / {len(targets)} — Run {run_index} / {int(run_count)}**  "
+                    f"`{getattr(line, 'original_file_name', '')}`"
+                )
+                run_paths = []
+                try:
+                    workflow_json = build_lite_generation_workflow(line)
+                    for status in generate_image_with_progress(
+                        workflow_json,
+                        st.session_state.comfy_url,
+                        output_dir,
+                        f"gallery_all_{line.id}_{run_index}",
+                    ):
+                        if "value" in status:
+                            step_progress = (completed_steps + float(status["value"])) / total_steps
+                            progress_bar.progress(min(max(step_progress, 0.0), 1.0))
+                        if "text" in status:
+                            status_text.markdown(
+                                f"**Line {line_index} / {len(targets)} — Run {run_index} / {int(run_count)}**  "
+                                f"{status['text']}"
+                            )
+                        if status.get("type") == "done":
+                            run_paths.extend(_status_output_paths(status))
+                    if run_paths:
+                        records = [
+                            _make_generated_candidate_record(path, line, "gallery_global_generate")
+                            for path in run_paths
+                        ]
+                        _append_line_generated_candidates(line, records)
+                        success_count += len(run_paths)
+                    else:
+                        failure_records.append({
+                            "line": getattr(line, "original_file_name", line.id),
+                            "run": run_index,
+                            "error": "出力画像パスを取得できませんでした。",
+                        })
+                except Exception as exc:
+                    failure_records.append({
+                        "line": getattr(line, "original_file_name", line.id),
+                        "run": run_index,
+                        "error": str(exc),
+                    })
+                finally:
+                    completed_steps += 1
+                    progress_bar.progress(min(completed_steps / total_steps, 1.0))
+
+        autosave_current_project("Gallery全生成")
+        if success_count:
+            st.success(f"Gallery全生成が完了しました。候補イラスト {success_count} 件を追加しました。")
+        if failure_records:
+            st.warning(f"{len(failure_records)} 件の生成で問題がありました。残りのLineは処理済みです。")
+            with st.expander("Gallery全生成エラー詳細", expanded=False):
+                st.json(failure_records)
+        if not success_count and not failure_records:
+            st.info("生成対象はありましたが、候補イラストは追加されませんでした。")
+
 def render_illustration_selection_mode(project) -> None:
     active_lines = [line for line in project.prompt_lines if not getattr(line, "deleted", False)]
     active_ids = {line.id for line in active_lines}
@@ -1337,6 +1467,7 @@ def render_illustration_selection_mode(project) -> None:
     display_ids = {line.id for line in display_lines}
     move_target_ids = [line.id for line in display_lines if move_targets.get(line.id)]
     st.write(f"選択: {len(move_target_ids)}件")
+    render_gallery_global_generation_controls(project, active_lines, display_lines, move_target_ids)
     if st.session_state.get("gallery_expanded_line_id") not in display_ids:
         st.session_state.gallery_expanded_line_id = None
 
@@ -1875,6 +2006,29 @@ def _append_line_generated_candidates(line, candidates_to_add):
 
 def add_candidate_image(line, image_path: str):
     _append_line_generated_candidates(line, _make_generated_candidate_record(image_path, line, "single_generate"))
+
+def _status_output_paths(status) -> list[str]:
+    paths = []
+    if not isinstance(status, dict):
+        return paths
+    if status.get("path"):
+        paths.append(str(status["path"]))
+    for path in status.get("paths") or []:
+        if path:
+            paths.append(str(path))
+    for image in status.get("images") or []:
+        if isinstance(image, dict) and image.get("path"):
+            paths.append(str(image["path"]))
+
+    unique_paths = []
+    seen = set()
+    for path in paths:
+        identity = _candidate_identity_path(path)
+        if identity in seen:
+            continue
+        unique_paths.append(path)
+        seen.add(identity)
+    return unique_paths
 
 def set_candidate_as_after(line, image_path: str):
     push_history()
