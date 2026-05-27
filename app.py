@@ -46,6 +46,29 @@ def normalize_agraph_selection(return_value, project):
 
     return valid_ids
 
+def sort_graph_node_ids_for_display(project, node_ids):
+    def sort_key(node_id):
+        node = project.nodes[node_id]
+        return (node.depth, node.display)
+
+    return sorted(
+        [node_id for node_id in node_ids if node_id in getattr(project, "nodes", {})],
+        key=sort_key,
+    )
+
+def get_wrapped_graph_positions(ordered_node_ids, row_size=6, x_gap=115, y_gap=90):
+    positions = {}
+    for index, node_id in enumerate(ordered_node_ids):
+        row = index // row_size
+        col = index % row_size
+        row_count = min(row_size, len(ordered_node_ids) - row * row_size)
+        x_offset = ((row_count - 1) * x_gap) / 2
+        positions[node_id] = {
+            "x": int(col * x_gap - x_offset),
+            "y": int(row * y_gap),
+        }
+    return positions
+
 if "settings" not in st.session_state:
     st.session_state.settings = load_settings()
 if "history" not in st.session_state:
@@ -56,6 +79,8 @@ if "current_project_path" not in st.session_state:
     st.session_state.current_project_path = ""
 if "selected_node_ids" not in st.session_state:
     st.session_state.selected_node_ids = []
+if "graph_auto_arrange_enabled" not in st.session_state:
+    st.session_state.graph_auto_arrange_enabled = False
 if "disabled_modules" not in st.session_state:
     st.session_state.disabled_modules = set()
 if "connect_mode" not in st.session_state:
@@ -2979,6 +3004,16 @@ if st.session_state.selection_mode_enabled:
 col1, col2 = st.columns([1, 1])
 
 with col1:
+    graph_control_cols = st.columns([1, 1.4])
+    with graph_control_cols[0]:
+        if st.button("グラフを自動整頓", key="graph_auto_arrange_button"):
+            st.session_state.graph_auto_arrange_enabled = True
+            st.rerun()
+    with graph_control_cols[1]:
+        if st.session_state.get("graph_auto_arrange_enabled"):
+            st.caption("自動整頓: 表示ノードを読みやすい行配置で表示中")
+        else:
+            st.caption("自動整頓は表示だけを変更し、プロンプトやプロジェクト内容は変更しません。")
     st.subheader("グラフプレビュー")
     st.caption("イラスト集の元となっている生成ソース（プロンプト）の各ワードについて、作品中でどのようなワードが一緒に使われているかを確認することができます。")
     
@@ -3021,13 +3056,25 @@ with col1:
     # --- Phase 2: render nodes from pre-computed set ---
     nodes = []
     displayed_node_ids = set()
+    ordered_display_node_ids = sort_graph_node_ids_for_display(project, display_node_ids)
+    graph_positions = (
+        get_wrapped_graph_positions(ordered_display_node_ids)
+        if st.session_state.get("graph_auto_arrange_enabled")
+        else {}
+    )
 
-    for node_id in display_node_ids:
+    for node_id in ordered_display_node_ids:
         if node_id not in project.nodes:
             continue
         node_data = project.nodes[node_id]
         color = "#FF9999" if node_id in st.session_state.selected_node_ids else "#97C2FC"
-        nodes.append(Node(id=node_id, label=f"{node_data.display}\n({node_data.count})", size=25, color=color))
+        node_kwargs = {}
+        if node_id in graph_positions:
+            node_kwargs = {
+                **graph_positions[node_id],
+                "fixed": {"x": True, "y": True},
+            }
+        nodes.append(Node(id=node_id, label=f"{node_data.display}\n({node_data.count})", size=25, color=color, **node_kwargs))
         displayed_node_ids.add(node_id)
 
     # --- Phase 3: render edges between displayed nodes only ---
@@ -3044,11 +3091,12 @@ with col1:
         else:
             st.caption(f"表示ノード: {len(displayed_node_ids)} / 初期Root表示")
         
+    auto_arrange_active = st.session_state.get("graph_auto_arrange_enabled")
     config = Config(width=600,
-                    height=360,
-                    directed=True, 
-                    physics=False, 
-                    hierarchical=True,
+                    height=420 if auto_arrange_active else 360,
+                    directed=True,
+                    physics=False,
+                    hierarchical=not auto_arrange_active,
                     direction="LR",
                     interaction={"multiselect": True})
 
