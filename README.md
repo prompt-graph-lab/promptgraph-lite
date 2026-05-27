@@ -234,6 +234,18 @@ Streamlit Cloud demo:
 
 https://promptgraph-lite.streamlit.app/
 
+The Streamlit Cloud version is mainly for UI preview, Gallery workflow preview, and browsing the included sample dataset. ComfyUI generation is not available in the cloud demo, so real generation workflows are best run locally.
+
+Streamlit Cloud版はUI確認・Galleryワークフロー体験・サンプルデータ閲覧用です。ComfyUI生成は利用できないため、実際の生成ワークフローにはローカル実行をおすすめします。
+
+---
+
+## Included Sample Dataset / サンプルデータ
+
+This repository includes sample PNG files with embedded metadata, so you can immediately test PNG metadata import, Gallery editing, route organization, candidate workflows, and ComfyUI workflow loading without preparing your own dataset first.
+
+このリポジトリにはメタ情報付きPNGサンプルが含まれているため、自分のデータセットを準備しなくても、PNGメタ情報読み込み、Gallery編集、ルート整理、候補ワークフロー、ComfyUIワークフロー読み込みをすぐ試せます。
+
 ---
 
 ## Installation
