@@ -1099,6 +1099,7 @@ def load_project_from_json(json_path: str) -> Project:
     
     # dict から dataclass への復元
     project = Project(source_directory=data.get("source_directory", ""))
+    project.merge_by_word_only = bool(data.get("merge_by_word_only", True))
     project.project_metadata = _normalize_project_metadata(data.get("project_metadata"))
     
     valid_pl_keys = {f.name for f in dataclasses.fields(PromptLine)}
