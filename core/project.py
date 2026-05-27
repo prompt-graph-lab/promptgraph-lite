@@ -55,7 +55,7 @@ class Project:
     node_freq: Dict[str, int] = field(default_factory=dict)
     phrase_freq: Dict[str, int] = field(default_factory=dict)
     global_group_freq: Dict[str, Dict[str, int]] = field(default_factory=dict)
-    merge_by_word_only: bool = False
+    merge_by_word_only: bool = True
     
     def clone(self) -> "Project":
         # Undo/Redo用のディープコピー

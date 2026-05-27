@@ -69,6 +69,66 @@ def get_wrapped_graph_positions(ordered_node_ids, row_size=6, x_gap=115, y_gap=9
         }
     return positions
 
+def get_cooccurrence_overlay_edges(
+    project,
+    ordered_display_node_ids,
+    min_count=2,
+    max_nodes_per_line=14,
+    max_edges_per_node=2,
+    max_edges=40,
+):
+    display_order = {
+        node_id: index
+        for index, node_id in enumerate(ordered_display_node_ids)
+        if node_id in getattr(project, "nodes", {})
+    }
+    displayed_node_ids = set(display_order)
+    if not project or len(displayed_node_ids) < 2:
+        return []
+
+    syntax_edges = set(getattr(project, "edges", []))
+    pair_counts = {}
+    for line in getattr(project, "prompt_lines", []):
+        if getattr(line, "deleted", False):
+            continue
+        line_node_ids = []
+        seen_in_line = set()
+        for node_id in getattr(line, "node_path", []):
+            if node_id in displayed_node_ids and node_id not in seen_in_line:
+                seen_in_line.add(node_id)
+                line_node_ids.append(node_id)
+        if len(line_node_ids) < 2:
+            continue
+        line_node_ids = sorted(line_node_ids, key=lambda node_id: display_order[node_id])[:max_nodes_per_line]
+        for index, source in enumerate(line_node_ids):
+            for target in line_node_ids[index + 1:]:
+                if (source, target) in syntax_edges or (target, source) in syntax_edges:
+                    continue
+                pair = tuple(sorted((source, target), key=lambda node_id: display_order[node_id]))
+                pair_counts[pair] = pair_counts.get(pair, 0) + 1
+
+    ranked_pairs = sorted(
+        (
+            (source, target, count)
+            for (source, target), count in pair_counts.items()
+            if count >= min_count
+        ),
+        key=lambda item: (-item[2], display_order[item[0]], display_order[item[1]]),
+    )
+    overlay_edges = []
+    per_node_counts = {}
+    for source, target, count in ranked_pairs:
+        if per_node_counts.get(source, 0) >= max_edges_per_node:
+            continue
+        if per_node_counts.get(target, 0) >= max_edges_per_node:
+            continue
+        overlay_edges.append((source, target, count))
+        per_node_counts[source] = per_node_counts.get(source, 0) + 1
+        per_node_counts[target] = per_node_counts.get(target, 0) + 1
+        if len(overlay_edges) >= max_edges:
+            break
+    return overlay_edges
+
 if "settings" not in st.session_state:
     st.session_state.settings = load_settings()
 if "history" not in st.session_state:
@@ -79,8 +139,8 @@ if "current_project_path" not in st.session_state:
     st.session_state.current_project_path = ""
 if "selected_node_ids" not in st.session_state:
     st.session_state.selected_node_ids = []
-if "graph_auto_arrange_enabled" not in st.session_state:
-    st.session_state.graph_auto_arrange_enabled = False
+if "graph_layout_mode" not in st.session_state:
+    st.session_state.graph_layout_mode = "cluster"
 if "disabled_modules" not in st.session_state:
     st.session_state.disabled_modules = set()
 if "connect_mode" not in st.session_state:
@@ -2813,7 +2873,7 @@ neighborhood_steps = st.sidebar.slider(
     "近傍ステップ",
     min_value=1,
     max_value=5,
-    value=st.session_state.get("neighborhood_steps", 2),
+    value=st.session_state.get("neighborhood_steps", 5),
     key="neighborhood_steps",
     disabled=not has_selection,
     help="ノード選択時に、選択ノードの前後何ステップまで表示するかを指定します。"
@@ -2825,7 +2885,7 @@ if not has_selection:
 display_depth = st.session_state.get("display_depth", 2)  # kept internally; not shown in UI
 
 if is_free():
-    current_merge = getattr(st.session_state.project, "merge_by_word_only", False) if st.session_state.project else False
+    current_merge = getattr(st.session_state.project, "merge_by_word_only", True) if st.session_state.project else True
     merge_preview = st.sidebar.checkbox(
         "同一単語をまとめて表示（Preview）",
         value=current_merge,
@@ -2840,7 +2900,10 @@ if is_free():
         sync_text_areas()
         st.rerun()
 else:
-    merge_by_word = st.sidebar.checkbox("同一単語をまとめる（深さを無視）", value=False)
+    merge_by_word = st.sidebar.checkbox(
+        "同一単語をまとめる（深さを無視）",
+        value=getattr(st.session_state.project, "merge_by_word_only", True) if st.session_state.project else True,
+    )
     if st.session_state.project and getattr(st.session_state.project, "merge_by_word_only", False) != merge_by_word:
         st.session_state.project.merge_by_word_only = merge_by_word
         prev_focus = st.session_state.get("focused_line_id")
@@ -3004,19 +3067,24 @@ if st.session_state.selection_mode_enabled:
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    graph_control_cols = st.columns([1, 1.4])
-    with graph_control_cols[0]:
-        if st.button("グラフを自動整頓", key="graph_auto_arrange_button"):
-            st.session_state.graph_auto_arrange_enabled = True
-            st.rerun()
-    with graph_control_cols[1]:
-        if st.session_state.get("graph_auto_arrange_enabled"):
-            st.caption("自動整頓: 表示ノードを読みやすい行配置で表示中")
-        else:
-            st.caption("自動整頓は表示だけを変更し、プロンプトやプロジェクト内容は変更しません。")
     st.subheader("グラフプレビュー")
     st.caption("イラスト集の元となっている生成ソース（プロンプト）の各ワードについて、作品中でどのようなワードが一緒に使われているかを確認することができます。")
-    
+    graph_layout_options = {
+        "通常": "default",
+        "均等整列": "wrapped",
+        "クラスタ整列": "cluster",
+    }
+    current_graph_layout = st.session_state.get("graph_layout_mode", "cluster")
+    graph_layout_index = list(graph_layout_options.values()).index(current_graph_layout) if current_graph_layout in graph_layout_options.values() else 2
+    selected_graph_layout_label = st.selectbox(
+        "グラフレイアウト",
+        list(graph_layout_options.keys()),
+        index=graph_layout_index,
+        key="graph_layout_mode_select",
+    )
+    st.session_state.graph_layout_mode = graph_layout_options[selected_graph_layout_label]
+    st.caption("Liteでは、全体編集を開いた直後に構造が見えるよう、クラスタ整列・同一ノード統合・近傍5を既定にしています。")
+
     if not hasattr(project, "phrase_freq"):
         project = build_graph(project)
         st.session_state.project = project
@@ -3057,9 +3125,10 @@ with col1:
     nodes = []
     displayed_node_ids = set()
     ordered_display_node_ids = sort_graph_node_ids_for_display(project, display_node_ids)
+    graph_layout_mode = st.session_state.get("graph_layout_mode", "cluster")
     graph_positions = (
         get_wrapped_graph_positions(ordered_display_node_ids)
-        if st.session_state.get("graph_auto_arrange_enabled")
+        if graph_layout_mode == "wrapped"
         else {}
     )
 
@@ -3081,7 +3150,25 @@ with col1:
     edges = []
     for source, target in project.edges:
         if source in displayed_node_ids and target in displayed_node_ids:
-            edges.append(Edge(source=source, label="", target=target, type="CURVE_SMOOTH"))
+            source_count = getattr(project.nodes.get(source), "count", 1)
+            target_count = getattr(project.nodes.get(target), "count", 1)
+            edge_width = min(5, max(1, int(min(source_count, target_count) ** 0.5)))
+            edges.append(Edge(source=source, label="", target=target, type="CURVE_SMOOTH", width=edge_width))
+    if graph_layout_mode == "cluster":
+        for source, target, count in get_cooccurrence_overlay_edges(project, ordered_display_node_ids):
+            edges.append(
+                Edge(
+                    source=source,
+                    label="",
+                    target=target,
+                    type="CURVE_SMOOTH",
+                    color="#D3D8DE",
+                    width=min(4, max(1, count)),
+                    dashes=True,
+                    title=f"Co-occurs in {count} prompt lines",
+                    arrows={"to": {"enabled": False}},
+                )
+            )
 
     # Debug: verify Python-side node count changes with Neighborhood Steps
     debug_graph = False
@@ -3091,14 +3178,25 @@ with col1:
         else:
             st.caption(f"表示ノード: {len(displayed_node_ids)} / 初期Root表示")
         
-    auto_arrange_active = st.session_state.get("graph_auto_arrange_enabled")
-    config = Config(width=600,
-                    height=420 if auto_arrange_active else 360,
-                    directed=True,
-                    physics=False,
-                    hierarchical=not auto_arrange_active,
-                    direction="LR",
-                    interaction={"multiselect": True})
+    cluster_layout_active = graph_layout_mode == "cluster"
+    wrapped_layout_active = graph_layout_mode == "wrapped"
+    config_kwargs = {
+        "width": 600,
+        "height": 440 if cluster_layout_active else 420 if wrapped_layout_active else 360,
+        "directed": True,
+        "physics": cluster_layout_active,
+        "hierarchical": not (wrapped_layout_active or cluster_layout_active),
+        "direction": "LR",
+        "interaction": {"multiselect": True},
+    }
+    if cluster_layout_active:
+        config_kwargs.update({
+            "solver": "forceAtlas2Based",
+            "stabilization": True,
+            "minVelocity": 0.75,
+            "timestep": 0.35,
+        })
+    config = Config(**config_kwargs)
 
     return_value = agraph(nodes=nodes, edges=edges, config=config)
     
