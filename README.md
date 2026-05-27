@@ -1,313 +1,271 @@
 # PromptGraph Lite
 
-Gallery-centered prompt and AI illustration sequence editor for Stable Diffusion / ComfyUI workflows.
+PromptGraph Lite is a lightweight Gallery-first editor for building AI illustration sequences from prompts, PNG metadata, and ComfyUI-generated candidates.
 
-PromptGraph Lite helps creators import existing AI illustration assets, review them as an image sequence, edit generation source prompts beside the images, generate candidates, insert good results back into the sequence, and save/export the project for long-term reuse.
+PromptGraph Liteは、プロンプト・PNGメタ情報・ComfyUI生成候補を使ってAIイラスト集を組み立てる、Gallery中心の軽量編集ツールです。
 
-Instead of treating prompts as one long disposable text string, PromptGraph treats each illustration and its generation source as a reusable project unit.
+![Gallery Edit](docs/gallery_edit.png)
 
-The goal is to make AI illustration collections:
-- easier to review
-- easier to clean up
-- easier to reorder
-- easier to branch and continue
-- easier to regenerate and export safely
+Edit prompts, generate candidates, and insert only the good images into the main sequence.
 
-PromptGraph remains lineage-oriented, but Lite is now primarily image/gallery-driven. Graph and PromptCloud views still exist for understanding the whole project, while day-to-day editing starts from the gallery.
+プロンプトを編集し、候補画像を生成し、良いものだけを本編列へ追加できます。
 
 ---
 
-# Lite Gallery Workflow
+## What It Does
 
-PromptGraph Lite is the entry point for practical illustration-sequence editing.
+PromptGraph Lite is not just a prompt viewer or graph visualization tool. It is a practical workspace for reviewing, editing, generating, branching, recovering, and exporting AI illustration sequences.
 
-The current workflow is:
+PromptGraph Liteは、単なるプロンプトビューアやグラフ表示ツールではありません。AIイラスト集を見ながら編集し、候補生成・分岐整理・復帰・出力まで行うための作業環境です。
 
-1. Load an illustration set from folders, prompt text files, PNG metadata, or an existing project.
-2. Review the project in Gallery Edit Mode.
-3. Delete unnecessary illustrations from the active sequence.
-4. Edit generation source prompts inline with each image.
-5. Generate candidate images with ComfyUI, or manually add external candidate images.
-6. Insert good candidates immediately after the source illustration to continue the sequence.
-7. Create branch or continuation variations as alternate illustration routes.
-8. Save the project and export prompt/image sets for reuse or sharing.
+The graph and PromptCloud views still exist, but they are now secondary overview tools. The main workflow starts from the image gallery.
 
-Lite is intentionally not a random prompt generator. It is for maintaining, modifying, and reusing existing AI illustration assets and prompt/image collections.
+グラフとPromptCloudは、イラスト集全体の構造を確認するための補助ビューです。日常的な編集はGallery Edit Modeから始まります。
 
 ---
 
-# What is PromptGraph?
+## Gallery-First Workflow
 
-Traditional prompt editing often becomes difficult as prompts grow larger.
+![Lite Gallery Workflow](docs/lite_gallery_workflow.svg)
 
-Example:
+1. Create or open a project.
+2. Import PNG metadata, prompt text files, image folders, or an existing project.
+3. Review the illustration sequence in Gallery Edit Mode.
+4. Delete unwanted illustrations or restore them from Trash View.
+5. Edit generation source prompts inline beside each image.
+6. Generate candidates with ComfyUI, including N-run and gallery-wide generation.
+7. Insert good candidates directly after the source illustration.
+8. Organize routes with separators, route switching, collapse, colors, and branch actions.
+9. Export prompt/image sets with metadata-safe public output options.
 
-    1girl, smile, outdoors, blue sky, detailed eyes, cinematic lighting...
+基本の流れ:
 
-As projects become larger and more repetitive:
-- editing becomes difficult
-- reusable structures become hard to manage
-- illustration sequence order becomes unclear
-- candidate outputs become hard to compare
-- workflow organization becomes painful
-
-PromptGraph organizes prompts, images, and generated candidates as a persistent project.
-
-This enables:
-- image-sequence review
-- prompt source editing beside images
-- candidate-based iteration
-- safer project-level cleanup
-- prompt structure inspection through graph and PromptCloud views
-- future route/story workflow support
-
----
-
-# Core Concepts
-
-## Illustration Line
-
-An illustration line is one item in the project sequence.
-
-It can contain:
-- a reference/original image
-- generation source prompt text
-- generated candidate images
-- inserted continuation images
-- metadata imported from generated PNG files
-
-Example prompt:
-
-    1girl, smile, school uniform, classroom
+1. プロジェクトを作成または開きます。
+2. PNGメタ情報、プロンプトtxt、画像フォルダ、既存project.jsonを読み込みます。
+3. Gallery Edit Modeでイラスト列を確認します。
+4. 不要なイラストを削除し、必要ならTrash Viewから復帰します。
+5. 各イラストの横で生成ソース（プロンプト）を直接編集します。
+6. ComfyUIで候補を生成します。N回生成やGallery全生成にも対応します。
+7. 良い候補だけを元イラストの直後へ追加します。
+8. ルート区切り、ルート切替、折りたたみ、色、分岐ボタンで流れを整理します。
+9. メタデータ安全化付きで、生成ソースと画像セットを出力します。
 
 ---
 
-## Gallery Edit Mode
-
-Gallery Edit Mode is the main Lite workspace.
-
-It is designed for:
-- reviewing illustrations visually
-- selecting and reordering cards
-- deleting unwanted items from the active sequence
-- editing prompts inline
-- generating or adding candidates
-- inserting good candidates into the main illustration sequence
-
-This mode is the default editing surface for Lite.
-
----
-
-## Candidate Workflow
-
-Candidates are generated or manually added images attached to an illustration line.
-
-In Lite, a good candidate can be inserted immediately after the current illustration. This keeps the original line intact while adding the chosen result to the main sequence.
-
-This supports practical workflows such as:
-- trying several ComfyUI outputs
-- choosing the best continuation
-- building a story-like sequence from existing assets
-- branching a set without losing the original source image
-
----
-
-## Trash View Mode
-
-Deleting an illustration in Lite removes it from the active gallery, but it does not delete the source image file from disk.
-
-Deleted lines are marked internally with `deleted=True` and can be reviewed in Trash View Mode.
-
-Trash View Mode lets you:
-- see deleted illustrations separately from the main gallery
-- restore deleted illustrations with `復帰`
-- keep the main gallery focused and uncluttered
-
-There is no permanent-delete workflow in Lite yet.
-
----
-
-## Prompt Graph / PromptCloud
-
-PromptGraph still visualizes prompt words as graph structures.
-
-In Lite, graph and PromptCloud views are secondary, project-wide understanding tools. They help users inspect repeated words, prompt relationships, and the overall structure of an illustration collection.
-
-Advanced graph editing and large-scale structured operations remain Pro-oriented.
-
----
-
-# Current UI Direction
-
-PromptGraph Lite currently uses Streamlit as a rapid development and validation frontend.
-
-The current Lite build focuses on practical AI illustration production workflows:
-- gallery-first review
-- image sequence cleanup
-- inline generation source editing
-- ComfyUI single-image generation
-- candidate comparison and insertion
-- safe export for public sharing
-- project save/load and autosave
-
-The long-term design still separates:
-- prompt operation logic
-- parser logic
-- graph logic
-- project import/export logic
-- UI/frontend layers
-
-This enables future support for:
-- APIs
-- AI-agent workflows
-- MCP/server integrations
-- alternative frontends
-
----
-
-# Features
-
-## Available in PromptGraph Lite
+## Main Features
 
 - Gallery Edit Mode as the main workflow
-- Inline generation source prompt editing
-- Prompt-only line creation
-- Candidate image generation with ComfyUI
-- Manual external candidate image import
-- Candidate insertion into the main illustration sequence
-- Branch / continuation line creation
-- Single-line reorder and multi-select sequence insertion
-- Per-card deletion and selected-item deletion
-- Trash View Mode for restoring deleted illustrations
-- PNG metadata import for generated illustration assets
+- Inline prompt editing beside images
+- Prompt-only line creation for starting from text
+- PNG metadata import for generated AI illustration assets
 - Folder import for prompt/image collections
-- Project folder creation with `project.json` and `generated/`
-- JSON project save/load
-- Recent project tracking
-- Project autosave
-- Prompt graph visualization
-- PromptCloud / word frequency visualization
-- Overall edit mode for project-wide structure inspection
-- TXT prompt export
-- Prompt/image set export with ordered prompts and available illustration images
-- Public-safe export options with PNG metadata stripping
-- Streamlit-based UI
+- ComfyUI `workflow_api.json` generation
+- Embedded PNG ComfyUI workflow support
+- Force shared workflow option for consistent generation
+- Single-line generation, N-run generation, and gallery-wide generation
+- Candidate images attached to each illustration line
+- Candidate insertion into the main sequence
+- Manual external candidate image import
+- Multi-select sequence insertion and reorder controls
+- Route separators, route switch display, route collapse, route colors, and branch actions
+- Trash View Mode for restoring deleted illustrations
+- Project folders, `project.json`, recent projects, and autosave
+- Prompt Graph and PromptCloud as secondary overview tools
+- Prompt TXT export
+- Prompt/image set export with metadata-safe PNG cleanup
 
-Lite focuses on practical illustration-sequence editing. It supports the full basic loop of read, edit, generate, insert, save, recover, and export.
+主な機能:
+
+- Gallery Edit Modeを中心にした編集
+- 画像を見ながら生成ソース（プロンプト）を直接編集
+- テキストだけのPrompt Line作成
+- PNGメタ情報からの読み込み
+- フォルダ内のプロンプト/画像読み込み
+- ComfyUI `workflow_api.json` による生成
+- PNG埋め込みComfyUIワークフロー対応
+- 共通ワークフロー強制使用オプション
+- 1枚生成、N回生成、Gallery全生成
+- 各イラストに紐づく候補画像
+- 良い候補を本編列へ直後追加
+- 外部生成済み画像の候補追加
+- 複数選択による並び替え/挿入
+- ルート区切り、ルート切替、折りたたみ、色、分岐操作
+- 削除済みイラストを復帰できるTrash View
+- project.json、最近のプロジェクト、自動保存
+- 補助ビューとしてのPrompt Graph / PromptCloud
+- プロンプトtxt出力
+- 公開向けメタデータ削除付きの画像/生成ソースセット出力
 
 ---
 
-## Available in PromptGraph Pro
+## Core Concepts
 
-PromptGraph Pro expands the workflow with advanced structured editing and automation-oriented features.
+### Illustration Line
 
-Current and planned Pro features include:
-- Negative Prompt support
-- Token-aware batch editing
-- Batch line editing
-- Module authoring/editing
-- Scene pool and advanced scene operations
-- Advanced ComfyUI batch generation
-- Advanced workflow operations
-- Scene-oriented transformations
-- Prompt normalization workflows
-- AI-assisted editing systems
-- Future automation / API workflows
+An illustration line is one item in the active sequence. It can hold an original/reference image, generation source prompt, PNG metadata, and generated candidates.
+
+Illustration Lineは、本編列の1項目です。元画像、生成ソース（プロンプト）、PNGメタ情報、生成候補を保持できます。
+
+### Candidates
+
+Generated or manually added images stay as candidates until you choose to insert them. Inserting a candidate creates a new line immediately after the source line; it does not overwrite the original image.
+
+生成または手動追加された画像は候補として保持されます。候補を選ぶと、元Lineを上書きせず、その直後に新しいLineとして追加されます。
+
+### Routes
+
+Lite uses lightweight route separators rather than a full DAG editor. Separators can be colored, collapsed, switched, and created with the branch action.
+
+Liteのルート機能は、本格DAGではなく軽量な区切り表示です。区切りには色、折りたたみ、切替、分岐作成を使えます。
+
+### Trash View
+
+Deleting an illustration removes it from the active gallery, but it does not delete the source image file from disk. Deleted lines can be restored from Trash View.
+
+削除はプロジェクト上の一覧から外すだけで、元画像ファイルは削除しません。削除済みLineはTrash Viewから復帰できます。
 
 ---
 
-# Lite vs Pro
+## ComfyUI Workflow Support
 
-## PromptGraph Lite
+PromptGraph Lite can generate candidates through ComfyUI using an API-format `workflow_api.json`.
 
-Designed for:
-- AI illustration collection maintenance
-- gallery-based review
-- prompt editing beside images
-- ComfyUI single-image iteration
-- candidate insertion into an illustration sequence
-- recovering deleted project items through Trash View Mode
-- safe export and project persistence
+PromptGraph Liteは、API形式の `workflow_api.json` を使ってComfyUIから候補画像を生成できます。
 
-Lite intentionally limits advanced global graph editing, module editing, batch generation, and experimental AI-assisted features.
+Supported workflow behavior:
 
-The goal is:
+- Use embedded PNG workflow metadata when available.
+- Fall back to shared `workflow_api.json`.
+- Optionally force the shared workflow and ignore embedded workflows.
+- Generate one line, run multiple generations for one line, or generate across a route/project.
+
+対応内容:
+
+- PNGに埋め込まれたワークフローを利用
+- 共通の `workflow_api.json` へフォールバック
+- 埋め込みワークフローを無視して共通ワークフローを強制使用
+- 1Line生成、N回生成、ルート/プロジェクト全体生成
+
+---
+
+## Export And Public Safety
+
+Lite can export prompt/image sets in sequence order. Public-safe export can strip PNG metadata so local paths, workflow data, and environment information are not carried into shared images by default.
+
+Liteは、イラスト列の順番で生成ソースと画像セットを出力できます。公開向け出力では、PNG内のローカルパス、ワークフロー、環境情報などを削除する安全化を既定で重視しています。
+
+---
+
+## Lite vs Pro
+
+### PromptGraph Lite
+
+Lite focuses on practical illustration-sequence editing:
+
 - import existing assets
-- edit the illustration sequence visually
-- branch or continue selected images
-- save and resume projects
-- export usable prompt/image sets
+- edit prompts beside images
+- generate and compare candidates
+- insert good images into the sequence
+- organize lightweight routes
+- restore deleted items
+- export safely
 
----
+Liteは、実用的なAIイラスト集編集に集中します:
 
-## PromptGraph Pro
+- 既存素材を読み込む
+- 画像を見ながらプロンプトを直す
+- 候補を生成して比較する
+- 良い画像だけを本編列に追加する
+- 軽量ルートで整理する
+- 削除済みを復帰する
+- 安全に出力する
 
-Designed for:
-- fast structured editing
-- larger prompt workflows
+### PromptGraph Pro
+
+Pro focuses on advanced prompt and graph operations:
+
+- batch editing
+- module editing
 - advanced graph/prompt structure editing
-- automation-oriented operations
-- reusable transformation pipelines
-- future AI-agent integration
+- larger automation-oriented workflows
+- future API / agent workflows
 
-Pro focuses on scalable prompt workflow editing beyond the practical gallery workflow in Lite.
+Proは、より高度なプロンプト/グラフ操作に向けた版です:
 
----
-
-# Why PromptGraph?
-
-PromptGraph is not intended to be just another prompt textbox editor.
-
-The long-term goal is:
-
-- Prompt IDE
-- AI illustration sequence editor
-- Branch/route workflow system
-- Scene workflow system
-- AI-friendly prompt engine
-- Future MCP / agent-compatible workflow platform
-
-The project is designed around both:
-- human usability
-- machine-readable prompt structures
+- 一括編集
+- Module編集
+- 高度なグラフ/プロンプト構造編集
+- 大規模な自動化ワークフロー
+- 将来的なAPI/エージェント連携
 
 ---
 
-# Screenshots
+## Screenshots
 
-## Prompt Graph
+### Gallery Edit Mode
+
+![Gallery Edit](docs/gallery_edit.png)
+
+### Prompt Graph
 
 ![Prompt Graph](docs/graph.png)
 
-Graph and PromptCloud views help inspect repeated words and project-wide prompt relationships.
+Graph and PromptCloud help inspect repeated words and project-wide prompt relationships.
 
-> Graph layout and visualization will continue evolving during development.
+グラフとPromptCloudは、繰り返し使われるワードやプロジェクト全体のつながりを確認するための補助ビューです。
 
----
-
-## Word Cloud
+### PromptCloud
 
 ![Word Cloud](docs/wordcloud.png)
 
----
-
-## Focus Edit Mode
+### Focus Edit Mode
 
 ![Focus Edit Mode](docs/focusedit.png)
 
-Focus Edit remains available, but the main Lite workflow is now Gallery Edit Mode.
+Focus Edit remains available, but Gallery Edit Mode is the main Lite workflow.
+
+Focus Editも残っていますが、Liteの主導線はGallery Edit Modeです。
 
 ---
 
-# Demo
+## Demo
 
 Streamlit Cloud demo:
 
 https://promptgraph-lite.streamlit.app/
 
+The Streamlit Cloud version is mainly for UI preview, Gallery workflow preview, and browsing the included sample dataset. ComfyUI generation is not available in the cloud demo, so real generation workflows are best run locally.
+
+Streamlit Cloud版はUI確認・Galleryワークフロー体験・サンプルデータ閲覧用です。ComfyUI生成は利用できないため、実際の生成ワークフローにはローカル実行をおすすめします。
+
 ---
 
-# Support / FANBOX
+## Included Sample Dataset / サンプルデータ
+
+This repository includes sample PNG files with embedded metadata, so you can immediately test PNG metadata import, Gallery editing, route organization, candidate workflows, and ComfyUI workflow loading without preparing your own dataset first.
+
+このリポジトリにはメタ情報付きPNGサンプルが含まれているため、自分のデータセットを準備しなくても、PNGメタ情報読み込み、Gallery編集、ルート整理、候補ワークフロー、ComfyUIワークフロー読み込みをすぐ試せます。
+
+---
+
+## Installation
+
+### Local Launch
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+or:
+
+```bat
+run.bat
+```
+
+---
+
+## Support / FANBOX
 
 Project page and support:
 
@@ -315,49 +273,40 @@ https://promptgraph.fanbox.cc/
 
 ---
 
-# Installation
+## Roadmap
 
-## Local Launch
+Near-term direction:
 
-    pip install -r requirements.txt
-    streamlit run app.py
+- improve Gallery Edit Mode for larger projects
+- refine route/branch workflows without overcomplicating Lite
+- keep candidate insertion fast and understandable
+- improve ComfyUI generation reliability and workflow selection
+- keep public-safe export simple
+- keep graph and PromptCloud useful as overview tools
 
-or:
+今後の方向性:
 
-    run.bat
+- 大きなイラスト集でも使いやすいGallery編集
+- Liteらしい軽量なルート/分岐整理
+- 候補追加ワークフローの改善
+- ComfyUI生成とワークフロー選択の安定化
+- 公開向け安全出力の改善
+- 全体把握用のグラフ/PromptCloudの改善
 
----
+Future advanced graph editing, full route DAGs, and automation-heavy workflows are more Pro-oriented.
 
-# Roadmap
-
-Planned future directions include:
-
-- Improve Gallery Edit Mode for larger illustration projects
-- Continue validating candidate insertion workflows
-- Add lightweight branch/route editing concepts
-- Improve story/scene continuation workflows
-- Keep graph and PromptCloud useful as project-wide understanding tools
-- Separate core prompt operations from the UI
-- Prompt modules in a more mature subgraph-style direction
-- WD14Tagger integration
-- Image-to-prompt workflows
-- Prompt clustering
-- Prompt relationship analysis
-- AI-agent workflow support
-- Future frontend evolution after workflow validation
+高度なグラフ編集、本格的なDAGルート、強い自動化ワークフローはPro側で育てる予定です。
 
 ---
 
-# Disclaimer
+## Disclaimer
 
-PromptGraph Lite is an experimental early-stage tool.
+PromptGraph Lite is experimental and workflow-driven. The UI and project structure may continue to evolve as real illustration workflows are tested.
 
-The UI, workflow, and internal structure may evolve significantly during development.
-
-Feedback and workflow experiments are welcome.
+PromptGraph Liteは実験的なワークフロー検証中のツールです。実際のイラスト制作フローに合わせてUIや構造が変化する可能性があります。
 
 ---
 
-# License
+## License
 
 MIT License
